@@ -1,0 +1,113 @@
+name: Quick Windows package
+
+# A fast, self-contained Windows packaging path for a personal fork. It runs
+# only the steps that produce an installer, so a fork can get a runnable build
+# without the full release qualification gate. It intentionally does NOT
+# qualify or publish anything on its own.
+#
+# The updater inside the packaged app is bound to the upstream repository
+# (electron-builder.json5 -> win.publish and scripts/verify-win-update-artifacts.mjs).
+# A release created here is therefore a download convenience only; it is not an
+# update feed for the app.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Optional full commit SHA to build; empty builds the selected ref
+        required: false
+        type: string
+      release_tag:
+        description: Optional tag for a release in this fork; empty skips the release
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.expected_sha || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out revision
+        if: ${{ inputs.expected_sha != '' }}
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:EXPECTED_SHA -notmatch '^[a-f0-9]{40}$') {
+            throw 'expected_sha must be a full 40-character commit SHA'
+          }
+          $checkedOutSha = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($checkedOutSha -ne $env:EXPECTED_SHA) {
+            throw "Checked-out SHA mismatch: expected $env:EXPECTED_SHA, got $checkedOutSha"
+          }
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda
+        with:
+          version: 11.11.0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        shell: pwsh
+        run: pnpm run typecheck
+
+      - name: Rebuild native modules for Electron
+        shell: pwsh
+        run: pnpm run rebuild:electron
+
+      - name: Build renderer and main process
+        shell: pwsh
+        run: pnpm exec tsc && pnpm exec vite build
+
+      - name: Package the installer
+        shell: pwsh
+        run: pnpm exec electron-builder --win --x64 --publish never
+
+      - name: Upload the package
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-package
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            release/*/ai-novel-writer-setup-*.exe
+            release/*/ai-novel-writer-setup-*.exe.blockmap
+            release/*/latest.yml
+
+      - name: Create a release in this fork
+        if: ${{ inputs.release_tag != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem -Path release -Recurse -Filter 'ai-novel-writer-setup-*.exe' |
+            Where-Object { $_.Name -notmatch '__uninstaller' } |
+            Select-Object -First 1
+          if (-not $installer) { throw 'No installer was produced' }
+          $notes = "Built from ${{ github.sha }} on this fork. The in-app updater still points at the upstream repository, so this release is not an update feed."
+          gh release create $env:RELEASE_TAG $installer.FullName --repo $env:GITHUB_REPOSITORY --title $env:RELEASE_TAG --notes $notes
