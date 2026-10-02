@@ -7,6 +7,7 @@
 import { ipc } from './ipc-client'
 import { requireIpcSuccess } from './ipc-result'
 import type { DraftStatus } from '../shared/draft-status'
+import type { DraftWriteSource } from '../shared/ipc-channels'
 
 // 导入后端的类型定义
 import type { DraftMeta as DB_DraftMeta } from '../../electron/repositories/draft-repository'
@@ -23,7 +24,7 @@ export interface DraftMeta {
   wordCount?: number
   createdAt: string
   updatedAt?: string
-  source: 'write' | 'rewrite'
+  source: DraftWriteSource
 
   // 为了尽量不改 UI，我们伪造这两个字段
   filePath: string
@@ -66,7 +67,7 @@ function mapDraftMeta(dbMeta: DB_DraftMeta): DraftMeta {
   return {
     ...dbMeta,
     status: dbMeta.status as DraftStatus,
-    source: dbMeta.source as 'write' | 'rewrite',
+    source: dbMeta.source as DraftWriteSource,
     // 虚拟字段，UI通过 parse 得到版本号或者展示
     fileName: `draft_v${dbMeta.version}.md`,
     filePath: `vela://draft/${dbMeta.id}`, // 特殊的伪协议路径，用于 editor-store

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Save, BookOpen, RefreshCw, Plus, Trash2,
-  Sparkles, PenLine, ListChecks, AlertTriangle
+  Sparkles, PenLine, FilePlus, ListChecks, AlertTriangle
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
@@ -22,6 +22,7 @@ import {
   type DirectoryWorkflowParams,
 } from '../../services/workflows/directory-workflow'
 import { launchCreativeWorkflow } from '../../services/workflows/creative-workflow-launcher'
+import { createManualBlankDraft } from '../../services/manual-draft'
 import { guardDirectoryGeneration } from '../../services/workflow-guards'
 import DirectoryConfigDialog from '../dialogs/DirectoryConfigDialog'
 import BatchChapterCreationDialog from '../dialogs/BatchChapterCreationDialog'
@@ -38,6 +39,7 @@ import { globalEventBus } from '../../shared/event-bus'
 import { shouldRefreshBlueprints } from './blueprint-refresh'
 import { useLocaleStore } from '../../stores/locale-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
+import { useDraftStore } from '../../stores/draft-store'
 import {
   CHAPTER_CARD_TAB_ID,
   captureBlueprintSnapshots,
@@ -636,6 +638,59 @@ export default function ChapterCardEditor({
   }
 
   /**
+   * 新建空草稿 — 为当前选中的蓝图章节直接建一条空白草稿，不调用 AI。
+   *
+   * 与「写作此章」不同，它不受「只有权威下一章才能写」的门禁限制：任何已有
+   * 蓝图的章节都能起一条手写稿。空草稿不能定稿，所以不会污染定稿事实源。
+   */
+  const handleNewBlankDraft = async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (
+      !projectMatches
+      || !projectSession
+      || !selected
+      || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
+    ) return
+    const chapterNumber = selected.chapterNumber
+    setSaving(true)
+    try {
+      const result = await createManualBlankDraft(chapterNumber, projectSession)
+      if (!isCurrentProjectSession(projectSession)) return
+      await useDraftStore.getState().loadChapterDrafts(chapterNumber, projectKey, projectSession)
+      if (!isCurrentProjectSession(projectSession)) return
+      globalEventBus.emit('REFRESH_RESOURCE', {
+        resources: ['drafts', 'fileTree'],
+        projectPath: projectKey,
+        projectSession,
+      })
+      const filePath = `vela://draft/${result.draftId}`
+      useEditorStore.getState().openFile({
+        id: filePath,
+        name: `${text(`第 ${chapterNumber} 章`, `Chapter ${chapterNumber}`)} v${result.version}`,
+        type: 'chapter',
+        filePath,
+        content: '',
+        savedContent: '',
+        draftId: result.draftId,
+        chapterNumber,
+        draftStatus: 'draft',
+        projectKey,
+        projectSessionLease: projectSession.leaseId,
+      })
+      addLog('info', result.reusedExisting
+        ? text(`已打开第 ${chapterNumber} 章已有的空草稿`, `Opened the existing blank draft for Chapter ${chapterNumber}`)
+        : text(`已为第 ${chapterNumber} 章新建空草稿 v${result.version}`, `Created blank draft v${result.version} for Chapter ${chapterNumber}`))
+    } catch (err) {
+      if (!isCurrentProjectSession(projectSession)) return
+      const message = err instanceof Error ? err.message : String(err)
+      addLog('error', text(`新建空草稿失败：${message}`, `Could not create a blank draft: ${message}`))
+      toast.error(text(`新建空草稿失败\n\n${message}`, 'Could not create a blank draft.'))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setSaving(false)
+    }
+  }
+
+  /**
    * 旧版“小说拆解与仿写”曾把参考原文误写为草稿和定稿；此处只给用户一个
    * 明确确认后的恢复入口，不尝试自动判定或删除任何项目内容。
    */
@@ -938,6 +993,16 @@ export default function ChapterCardEditor({
                       <PenLine size={12} /> {text('写作此章', 'Write this chapter')}
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleNewBlankDraft()}
+                    disabled={saving}
+                    title={text('为本章创建空白草稿，不调用 AI，可直接手写', 'Create a blank draft for this chapter without calling AI, ready to write by hand')}
+                  >
+                    <FilePlus size={12} />
+                    {text('新建空草稿', 'New blank draft')}
+                  </Button>
                   <Button variant="destructive" size="sm" onClick={handleDeleteChapter} title={text('删除此章', 'Delete this chapter')}>
                     <Trash2 size={12} />
                     {text('删除此章', 'Delete chapter')}

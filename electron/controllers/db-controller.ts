@@ -47,7 +47,7 @@ import {
   isSourceDraftChangedError,
   SOURCE_DRAFT_CHANGED,
 } from '../repositories/draft-source-guard'
-import type { ExpectedDraftSource } from '../../src/shared/ipc-channels'
+import type { ExpectedDraftSource, DraftWriteSource } from '../../src/shared/ipc-channels'
 import { PostProcessRepository } from '../repositories/post-process-repository'
 
 // 沿用的旧表
@@ -633,7 +633,7 @@ export function registerDatabaseController() {
   ipcMain.handle('db:draft-create', async (_event, params: {
     chapterNumber: number
     version: number
-    source: 'write' | 'rewrite'
+    source: DraftWriteSource
     content: string
     wordCount: number
     sourceDependencies?: DraftSourceDependency[]
