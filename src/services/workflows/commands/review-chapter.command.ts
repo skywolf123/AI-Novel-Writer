@@ -6,6 +6,7 @@ import { ipc } from '../../ipc-client'
 import { requireIpcSuccess } from '../../ipc-result'
 import { projectSessionContextFromProject, sameProjectSessionContext } from '../../../shared/project-session-context'
 import type { ProjectSessionContext } from '../../../shared/ipc-channels'
+import type { DraftStatus } from '../../../shared/draft-status'
 import type { FinalizedContinuityProjection } from '../../../shared/finalized-continuity'
 import { readWorkflowDraftMeta } from '../workflow-draft-meta'
 import {
@@ -31,6 +32,20 @@ export interface ReviewChapterParams {
   chapterNumber: number
   /** 审稿维度侧重点（可选） */
   reviewFocus?: string
+  /**
+   * The manual editor opens the persisted report as a read-only tab. Headless
+   * orchestrators read the report from the database and opt out so batch runs
+   * do not leave stale tabs behind. Defaults to true.
+   */
+  openReportTab?: boolean
+  /** Frozen source identity handed to `db:review-create`; defaults to the draft itself. */
+  reviewSource?: {
+    id: number
+    chapterNumber: number
+    version: number
+    status: DraftStatus
+    content: string
+  }
 }
 
 const REVIEW_SUMMARY_MAX_CHARACTERS = 120
@@ -409,15 +424,19 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     const createResult = await ipc.invokeWithProjectSession(projectSession, 'db:review-create', {
       baseDraftId,
       content: JSON.stringify(parsedResult, null, 2),
-      ...(frozenSource ? {
-        expectedSource: {
-          id: frozenSource.id,
-          chapterNumber: frozenSource.chapterNumber,
-          version: frozenSource.version,
-          status: frozenSource.status,
-          content: draft,
-        },
-      } : {}),
+      ...(this.params.reviewSource
+        ? { expectedSource: { ...this.params.reviewSource } }
+        : frozenSource
+          ? {
+              expectedSource: {
+                id: frozenSource.id,
+                chapterNumber: frozenSource.chapterNumber,
+                version: frozenSource.version,
+                status: frozenSource.status,
+                content: draft,
+              },
+            }
+          : {}),
     }, context.projectPath)
     throwIfSourceDraftChanged(createResult, workflowUiLocale(context), 'review')
     requireIpcSuccess(createResult, text('保存审稿报告', 'Save the review report'))
@@ -428,28 +447,34 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     this.assertNotCancelled(context)
     const reportContent = JSON.stringify(parsedResult, null, 2)
 
-    if (!sameProjectSessionContext(
-      projectSession,
-      projectSessionContextFromProject(useProjectStore.getState().currentProject),
-    )) throw new Error(text('当前项目已切换，已拒绝打开旧审稿报告', 'The project changed, so the stale review report was not opened.'))
-    const { useEditorStore } = await import('../../../stores/editor-store')
-    const pseudoReviewPath = `vela://draft/ch${this.params.chapterNumber}/v${baseVersion}/review${revIndex}`
-    useEditorStore.getState().openFile({
-      id: `review-${this.params.draftPath}-${revIndex}`,
-      name: text(
-        `审稿报告：第${this.params.chapterNumber}章`,
-        `Review report: Chapter ${this.params.chapterNumber}`,
-      ),
-      type: 'review-report',
-      content: reportContent,
-      filePath: this.params.draftPath,
-      reportPath: pseudoReviewPath,
-      reviewReport: reportContent,
-      chapterNumber: this.params.chapterNumber,
-      chapterDir: `vela://draft/ch${this.params.chapterNumber}`,
-      reviewId: createResult.id,
-      projectKey: context.projectPath,
-    })
+    context.data.reviewId = createResult.id
+    context.data.reviewIndex = revIndex
+    context.data.reviewReport = reportContent
+
+    if (this.params.openReportTab !== false) {
+      if (!sameProjectSessionContext(
+        projectSession,
+        projectSessionContextFromProject(useProjectStore.getState().currentProject),
+      )) throw new Error(text('当前项目已切换，已拒绝打开旧审稿报告', 'The project changed, so the stale review report was not opened.'))
+      const { useEditorStore } = await import('../../../stores/editor-store')
+      const pseudoReviewPath = `vela://draft/ch${this.params.chapterNumber}/v${baseVersion}/review${revIndex}`
+      useEditorStore.getState().openFile({
+        id: `review-${this.params.draftPath}-${revIndex}`,
+        name: text(
+          `审稿报告：第${this.params.chapterNumber}章`,
+          `Review report: Chapter ${this.params.chapterNumber}`,
+        ),
+        type: 'review-report',
+        content: reportContent,
+        filePath: this.params.draftPath,
+        reportPath: pseudoReviewPath,
+        reviewReport: reportContent,
+        chapterNumber: this.params.chapterNumber,
+        chapterDir: `vela://draft/ch${this.params.chapterNumber}`,
+        reviewId: createResult.id,
+        projectKey: context.projectPath,
+      })
+    }
 
     callbacks.log(text(
       `审查完成，已生成审稿报告 r${revIndex}`,

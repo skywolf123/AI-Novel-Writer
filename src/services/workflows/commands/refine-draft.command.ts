@@ -28,6 +28,12 @@ export interface RefineDraftParams {
   mergedGuidance?: string
   userRefinePrompt?: string
   shortSummary?: string
+  /**
+   * The manual editor opens the produced revision as a merge tab after the
+   * command finishes. Headless orchestrators merge the revision themselves, so
+   * they opt out instead of leaving stale tabs behind. Defaults to true.
+   */
+  openMergeView?: boolean
 }
 
 export class RefineDraftCommand extends BaseWorkflowCommand<string> {
@@ -132,28 +138,32 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
     }
 
     const revIndex = createRes.revisionIndex ?? 0
+    context.data.revisionId = createRes.id
+    context.data.revisionIndex = revIndex
 
-    this.assertNotCancelled(context)
-    if (!sameProjectSessionContext(
-      projectSession,
-      projectSessionContextFromProject(useProjectStore.getState().currentProject),
-    )) throw new Error(text('当前项目已切换，已拒绝打开旧修订稿', 'The project changed, so the stale revision was not opened.'))
-    const { useEditorStore } = await import('../../../stores/editor-store')
-    useEditorStore.getState().openFile({
-      id: `diff-${this.params.draftPath}-${createRes.id}`,
-      name: text(
-        `修稿合并：第${this.params.chapterNumber}章`,
-        `Revision merge: Chapter ${this.params.chapterNumber}`,
-      ),
-      type: 'diff',
-      filePath: this.params.draftPath,
-      originalContent: this.params.draftContent,
-      content: cleanRefined,
-      revisionPath: `vela://revision/${createRes.id}`,
-      chapterNumber: this.params.chapterNumber,
-      chapterDir: `vela://draft/ch${this.params.chapterNumber}`,
-      projectKey: context.projectPath,
-    })
+    if (this.params.openMergeView !== false) {
+      this.assertNotCancelled(context)
+      if (!sameProjectSessionContext(
+        projectSession,
+        projectSessionContextFromProject(useProjectStore.getState().currentProject),
+      )) throw new Error(text('当前项目已切换，已拒绝打开旧修订稿', 'The project changed, so the stale revision was not opened.'))
+      const { useEditorStore } = await import('../../../stores/editor-store')
+      useEditorStore.getState().openFile({
+        id: `diff-${this.params.draftPath}-${createRes.id}`,
+        name: text(
+          `修稿合并：第${this.params.chapterNumber}章`,
+          `Revision merge: Chapter ${this.params.chapterNumber}`,
+        ),
+        type: 'diff',
+        filePath: this.params.draftPath,
+        originalContent: this.params.draftContent,
+        content: cleanRefined,
+        revisionPath: `vela://revision/${createRes.id}`,
+        chapterNumber: this.params.chapterNumber,
+        chapterDir: `vela://draft/ch${this.params.chapterNumber}`,
+        projectKey: context.projectPath,
+      })
+    }
 
     context.data.refined = cleanRefined
     context.data.refinedPath = this.params.draftPath
