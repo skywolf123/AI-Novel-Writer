@@ -31,7 +31,12 @@ import { ipc } from '../../services/ipc-client'
 import { requireIpcSuccess } from '../../services/ipc-result'
 import type { ExpectedDraftSource, ModelProfile } from '../../shared/ipc-channels'
 import { resolveWritingLanguage, type WritingLanguage } from '../../shared/writing-language'
-import { parseChapterGoalReview, type ChapterGoalReview } from '../../shared/chapter-goal-review'
+import {
+  defaultReviewDecision,
+  normalizeReviewSeverity,
+  parseReviewReport,
+  type ReviewIssue,
+} from '../../shared/review-report'
 import {
   createHumanConfirmedReviewSnapshot,
   hasIncludedReviewItems,
@@ -41,33 +46,6 @@ import {
   type HumanConfirmedReviewItem,
   type HumanConfirmedReviewSnapshot,
 } from '../../shared/human-confirmed-review'
-
-/** 审稿问题条目（JSON 格式） */
-interface ReviewIssue {
-  category: string
-  severity: 'error' | 'warning' | 'pass' | 'unknown'
-  goalId?: string
-  description: string
-  /** 引用的原文片段（有问题时提供） */
-  quote?: string
-  stableFactKey?: string
-  sourceChapter?: number
-}
-
-/** AI 返回的 JSON 审稿结构 */
-interface ReviewJSON {
-  goalReview?: unknown
-  items: Array<{
-    category: string
-    severity: string
-    goalId?: string
-    description: string
-    quote?: string
-    stableFactKey?: string
-    sourceChapter?: number
-  }>
-  summary: string
-}
 
 interface ReviewReportProps {
   /** 原始审稿报告文本（JSON 或旧版 markdown） */
@@ -94,117 +72,6 @@ interface ConfirmedChecklist {
   reviewSourceId: number
   content: string
   snapshot: HumanConfirmedReviewSnapshot
-}
-
-// ===== 解析器 =====
-
-/** 标准化 severity 值 */
-function normalizeSeverity(raw: string): ReviewIssue['severity'] {
-  const s = typeof raw === 'string' ? raw.toLowerCase().trim() : ''
-  if (s === 'error' || s === 'critical' || s === 'severe') return 'error'
-  if (s === 'warning' || s === 'warn' || s === 'minor') return 'warning'
-  if (s === 'pass') return 'pass'
-  return 'unknown'
-}
-
-/** 尝试从文本中提取 JSON（兼容 ```json 包裹） */
-function extractJSON(text: string): string | null {
-  // 先尝试直接解析
-  const trimmed = text.trim()
-  if (trimmed.startsWith('{')) return trimmed
-
-  // 尝试从 ```json ... ``` 中提取
-  const codeBlockMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
-  if (codeBlockMatch) return codeBlockMatch[1].trim()
-
-  // 尝试找第一个 { 和最后一个 }
-  const firstBrace = trimmed.indexOf('{')
-  const lastBrace = trimmed.lastIndexOf('}')
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1)
-  }
-
-  return null
-}
-
-/** 解析审稿报告（优先 JSON，回退到旧版文本解析） */
-function parseReport(text: string, fallbackCategory: string): { issues: ReviewIssue[]; summary: string; goalReview?: ChapterGoalReview } {
-  const jsonStr = extractJSON(text)
-  if (jsonStr) {
-    try {
-      const data = JSON.parse(jsonStr) as ReviewJSON
-      if (data.items && Array.isArray(data.items)) {
-        const issues: ReviewIssue[] = data.items.map(item => ({
-          category: item.category || fallbackCategory,
-          severity: normalizeSeverity(item.severity),
-          goalId: item.goalId,
-          description: item.description || '',
-          quote: item.quote || undefined,
-          stableFactKey: item.stableFactKey || undefined,
-          sourceChapter: Number.isSafeInteger(item.sourceChapter) && Number(item.sourceChapter) > 0
-            ? item.sourceChapter
-            : undefined,
-        }))
-        return { issues, summary: data.summary || '', goalReview: parseChapterGoalReview(data.goalReview) ?? undefined }
-      }
-    } catch {
-      // JSON 解析失败，回退到文本解析
-    }
-  }
-
-  // 回退：旧版 markdown 文本解析（兼容历史数据）
-  return parseLegacyReport(text, fallbackCategory)
-}
-
-/** 旧版文本解析器（兼容历史审稿报告） */
-function parseLegacyReport(text: string, fallbackCategory: string): { issues: ReviewIssue[]; summary: string } {
-  const issues: ReviewIssue[] = []
-  const lines = text.split('\n')
-  let currentCategory = fallbackCategory
-  const summaryLines: string[] = []
-  let inSummary = false
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-
-    // 匹配标题行
-    const headingMatch = trimmed.match(/^#{2,3}\s+(.+)/)
-    if (headingMatch) {
-      const heading = headingMatch[1].replace(/[*_]/g, '')
-      if (/总体评价|总结|总评/.test(heading)) {
-        inSummary = true
-      } else {
-        inSummary = false
-        currentCategory = heading
-      }
-      continue
-    }
-
-    if (inSummary) {
-      summaryLines.push(trimmed.replace(/^[-*]\s*/, ''))
-      continue
-    }
-
-    // 检测 emoji 严重级别
-    let severity: ReviewIssue['severity'] = 'pass'
-    if (trimmed.includes('🔴')) severity = 'error'
-    else if (trimmed.includes('🟡')) severity = 'warning'
-    else if (trimmed.includes('🟢') || trimmed.includes('✅')) severity = 'pass'
-    else if (trimmed.startsWith('-') || trimmed.startsWith('*')) severity = 'warning'
-    else continue
-
-    const cleanDesc = trimmed
-      .replace(/^[-*]\s*/, '')
-      .replace(/[🔴🟡🟢✅]\s*/u, '')
-      .replace(/\*\*/g, '')
-
-    if (cleanDesc) {
-      issues.push({ category: currentCategory, severity, description: cleanDesc })
-    }
-  }
-
-  return { issues, summary: summaryLines.join(' ') }
 }
 
 // ===== 视觉配置 =====
@@ -306,7 +173,7 @@ function editableItemsFromReview(
     return snapshot.items.map((item, index) => ({
       ...item,
       id: item.origin + '-' + (index + 1),
-      severity: normalizeSeverity(item.severity),
+      severity: normalizeReviewSeverity(item.severity),
     }))
   }
 
@@ -319,7 +186,7 @@ function editableItemsFromReview(
     ...(issue.stableFactKey ? { stableFactKey: issue.stableFactKey } : {}),
     ...(issue.sourceChapter ? { sourceChapter: issue.sourceChapter } : {}),
     ...(issue.goalId ? { goalId: issue.goalId } : {}),
-    decision: !issue.goalId && (issue.severity === 'error' || issue.severity === 'warning') ? 'apply' : 'ignore',
+    decision: defaultReviewDecision({ goalId: issue.goalId, severity: issue.severity }),
     origin: 'ai',
   }))
 }
@@ -374,7 +241,7 @@ function ReviewReportSession({
       ? s.currentProject.novelConfig.writingLanguage
       : undefined,
   ))
-  const parsedReport = parseReport(reportText, text('综合检查', 'General review'))
+  const parsedReport = parseReviewReport(reportText, text('综合检查', 'General review'))
   const [items, setItems] = useState<EditableReviewItem[]>(() => (
     editableItemsFromReview(parsedReport.issues, initialSnapshot)
   ))
@@ -910,7 +777,7 @@ function ReviewReportSession({
                                     aria-label={text('严重程度', 'Severity')}
                                     value={item.severity}
                                     onChange={(event) => {
-                                      const severity = normalizeSeverity(event.target.value)
+                                      const severity = normalizeReviewSeverity(event.target.value)
                                       updateItem(item.id, {
                                         severity,
                                         ...(severity === 'unknown' ? { decision: 'ignore' } : {}),
