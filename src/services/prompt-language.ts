@@ -369,14 +369,16 @@ Return JSON only, with no Markdown, preface, analysis, plan, code fence, or reas
 {{novel_architecture}}
 
 [Previously validated blueprint progress]
+Each line is "Chapter N — Title: key events (goal: ...; hook: ...)":
 {{chapter_list}}
 
 [Requirements]
 1. Continue causally from the last validated chapter.
 2. Maintain an escalation or payoff cycle every three to five chapters.
 3. Resolve or intensify relevant open threats and planted clues.
-4. Give every chapter a material event change; do not add filler.
-5. Return exactly one JSON object with a blueprints array and no analysis, plan, explanation, Markdown, or code fence.
+4. Carry forward the last chapter's goal and hook: advance from its hook, but do not re-run a goal it already achieved, and do not restate the previous hook or goal in place unless the author's facts explicitly require it.
+5. Give every chapter a material event change; do not add filler.
+6. Return exactly one JSON object with a blueprints array and no analysis, plan, explanation, Markdown, or code fence.
 
 [Author pacing and style guidance]
 {{pacing_guidance}}`,
