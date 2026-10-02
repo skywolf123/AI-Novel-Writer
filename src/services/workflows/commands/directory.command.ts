@@ -257,6 +257,7 @@ function buildCompactBlueprintTask(input: {
     recentBlueprints: input.previous.slice(-COMPACT_RECENT_BLUEPRINTS).map(chapter => ({
       chapterNumber: chapter.chapterNumber,
       title: boundedFactText(chapter.title, 240),
+      purpose: boundedFactText(chapter.purpose, 480),
       keyEvents: boundedFactText(chapter.keyEvents, 1_200),
       suspenseHook: boundedFactText(chapter.suspenseHook, 480),
     })),
@@ -316,6 +317,44 @@ function buildCompactBlueprintTask(input: {
       ],
     },
   }
+}
+
+const PREVIOUS_BLUEPRINT_TEXT_LIMITS = {
+  title: BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.titleCharacters,
+  purpose: BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.purposeCharacters,
+  // The contract's hard cap is 1,200 but its recommended target is 900. The
+  // continuity block is a summary, so the tighter bound keeps one legacy
+  // chapter from crowding out the other 99 in the window.
+  keyEvents: 900,
+  suspenseHook: BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.suspenseHookCharacters,
+} as const
+
+/**
+ * Renders one already-validated chapter blueprint for the continuity block of
+ * the next batch. title/keyEvents preserve the historical line exactly; purpose
+ * and suspenseHook are appended so the architect can honour the protagonist's
+ * stated goal and pay off (rather than re-run) the previous chapter's hook.
+ * Each field is bounded by the semantic contract's own output ceiling, so a
+ * legacy over-long blueprint can never inflate the prompt past its budget.
+ */
+function formatPreviousBlueprintLine(
+  chapter: ChapterBlueprint,
+  writingLanguage: CommandExecuteParams['context']['writingLanguage'],
+): string {
+  const title = boundedFactText(chapter.title, PREVIOUS_BLUEPRINT_TEXT_LIMITS.title)
+  const keyEvents = boundedFactText(chapter.keyEvents, PREVIOUS_BLUEPRINT_TEXT_LIMITS.keyEvents)
+  const purpose = boundedFactText(chapter.purpose, PREVIOUS_BLUEPRINT_TEXT_LIMITS.purpose)
+  const suspenseHook = boundedFactText(chapter.suspenseHook, PREVIOUS_BLUEPRINT_TEXT_LIMITS.suspenseHook)
+  const extras = [
+    purpose && promptLanguageText(writingLanguage, `目标：${purpose}`, `goal: ${purpose}`),
+    suspenseHook && promptLanguageText(writingLanguage, `钩子：${suspenseHook}`, `hook: ${suspenseHook}`),
+  ].filter(Boolean)
+  const base = promptLanguageText(
+    writingLanguage,
+    `第${chapter.chapterNumber}章 ${title}：${keyEvents}`,
+    `Chapter ${chapter.chapterNumber} — ${title}: ${keyEvents}`,
+  )
+  return extras.length > 0 ? `${base}（${extras.join('；')}）` : base
 }
 
 function observeWorkflowCancellation(context: CommandExecuteParams['context']): {
@@ -434,11 +473,7 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
         ))
         const previous = [...existingBlueprints, ...validatedPrefix]
         const chapterList = previous.slice(-100)
-          .map(chapter => promptLanguageText(
-            writingLanguage,
-            `第${chapter.chapterNumber}章 ${chapter.title}：${chapter.keyEvents}`,
-            `Chapter ${chapter.chapterNumber} — ${chapter.title}: ${chapter.keyEvents}`,
-          ))
+          .map(chapter => formatPreviousBlueprintLine(chapter, writingLanguage))
           .join('\n')
         const prompt = new DirectoryPromptBuilder(template, writingLanguage)
           .withNovelArchitecture(architecture)

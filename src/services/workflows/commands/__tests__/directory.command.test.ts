@@ -860,6 +860,47 @@ describe('GenerateDirectoryCommand', () => {
     })
   })
 
+  it('carries each preceding chapter goal and hook into the next batch prompt', async () => {
+    stubIpcInvoke(successfulCommitHandler())
+    const observedPrompts: string[] = []
+    const session = generationSession(async (task) => {
+      observedPrompts.push(task.messages.find(message => message.role === 'user')?.content ?? '')
+      const range = taskRange(task)
+      const chapters = Array.from(
+        { length: range[1] - range[0] + 1 },
+        (_, index) => range[0] + index,
+      )
+      return {
+        status: 'completed',
+        content: blueprintJson(chapters),
+        finishReason: 'stop',
+        receipt: generationReceipt(observedPrompts.length, 'stop'),
+      }
+    })
+    const command = new GenerateDirectoryCommand(
+      { mode: 'full', count: 6 },
+      { ...projectSnapshot, novelConfig: { ...projectSnapshot.novelConfig, totalChapters: 6 } },
+      { createRuntime: vi.fn(async () => testRuntime(session)) },
+    )
+
+    await command.execute({
+      step: {},
+      context: workflowContext(),
+      callbacks: stepCallbacks(),
+    })
+
+    // Batch 1 [1,5] has no preceding chapters; batch 2 [6] must see 1 through 5.
+    expect(observedPrompts).toHaveLength(2)
+    expect(observedPrompts[0]).toContain('（首批生成，尚无前置章节）')
+    const secondPrompt = observedPrompts[1]
+    expect(secondPrompt).toContain(
+      '第1章 第1章：第1章发生关键事件（目标：推进第1章；钩子：第1章留下新的悬念）',
+    )
+    expect(secondPrompt).toContain(
+      '第5章 第5章：第5章发生关键事件（目标：推进第5章；钩子：第5章留下新的悬念）',
+    )
+  })
+
   it('replaces one length-truncated single blueprint in full on the same runtime and commits once', async () => {
     const invoke = stubIpcInvoke(successfulCommitHandler())
     const observed: Array<{ range: [number, number]; purpose: string }> = []
