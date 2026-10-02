@@ -462,12 +462,12 @@ function BatchChapterCreationDialogSession({ isOpen, startChapterNumber, onClose
               <div className="space-y-1">
                 <p>{completionMode === 'auto_finalize'
                   ? text(
-                    '自动定稿会跳过逐章审稿确认，并把章节提交为只读正文；同时发布实体稿并运行角色与连续性后处理。',
-                    'Auto-finalize skips chapter-by-chapter review confirmation, commits read-only chapters, publishes manuscript files, and runs character and continuity post-processing.',
+                    '自动定稿会跳过逐章审稿确认，直接把章节定稿并转为只读，同时发布实体稿并运行角色与连续性后处理。',
+                    'Auto-finalize skips chapter-by-chapter review confirmation, marks chapters finalized and read-only, publishes manuscript files, and runs character and continuity post-processing.',
                   )
                   : text(
-                    'AI 全流程定稿会自动接受全部 AI 修改点，跳过逐章人工确认，并把章节提交为只读正文；同时发布实体稿并运行角色与连续性后处理。',
-                    'AI full-pipeline finalize accepts every AI change automatically, skips chapter-by-chapter confirmation, commits read-only chapters, publishes manuscript files, and runs character and continuity post-processing.',
+                    'AI 全流程定稿会自动接受全部 AI 修改点，跳过逐章人工确认，直接把章节定稿并转为只读，同时发布实体稿并运行角色与连续性后处理。',
+                    'AI full-pipeline finalize accepts every AI change automatically, skips chapter-by-chapter confirmation, marks chapters finalized and read-only, publishes manuscript files, and runs character and continuity post-processing.',
                   )}</p>
                 {confirmingAutoFinalize && (
                   <p className="font-medium">{completionMode === 'auto_finalize'
