@@ -67,6 +67,8 @@ function installIpc(options: {
   finalizedChapter?: (chapterNumber: number) => unknown
   onClearGeneratedText?: () => void
   authoritySequence?: AuthoritativeChapterSequence | (() => AuthoritativeChapterSequence)
+  latestDraft?: unknown | (() => unknown)
+  createdDraftId?: number
 } = {}) {
   const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
     if (channel === 'db:blueprint-get-all') return options.blueprints ?? [blueprint(1)]
@@ -83,6 +85,12 @@ function installIpc(options: {
       const chapterNumber = args[0] as number
       return options.finalizedChapter?.(chapterNumber) ?? null
     }
+    if (channel === 'db:draft-get-latest') {
+      return typeof options.latestDraft === 'function' ? options.latestDraft() : options.latestDraft ?? null
+    }
+    if (channel === 'db:draft-next-version') return 1
+    if (channel === 'db:draft-create') return { success: true, id: options.createdDraftId ?? 77 }
+    if (channel === 'db:draft-list') return []
     if (channel === 'db:project-clear-generated-data') {
       options.onClearGeneratedText?.()
       return { success: true, cleared: ['generatedText'] }
@@ -303,5 +311,56 @@ describe('ChapterCardEditor writing entry', () => {
     })
 
     expect(container?.textContent).not.toContain('检测到后续正文但第 1 章尚未写作')
+  })
+
+  it('creates a manual blank draft for a selected blueprint that is not the writable next chapter', async () => {
+    const invoke = installIpc({
+      blueprints: [blueprint(1), blueprint(2), blueprint(3)],
+      createdDraftId: 501,
+    })
+
+    await renderEditor()
+    await vi.waitFor(() => expect(container?.textContent).toContain('写作第1章'))
+    // 选中第 3 章蓝图（权威下一章是第 1 章），此时没有「写作此章」按钮
+    const listItems = Array.from(container?.querySelectorAll<HTMLElement>('div.group') ?? [])
+    const thirdItem = listItems.find(item => item.querySelector('.font-mono')?.textContent?.trim() === '3')
+    expect(thirdItem).toBeDefined()
+    await act(async () => thirdItem?.click())
+
+    await vi.waitFor(() => expect(container?.textContent).toContain('第 3 章：'))
+    expect(container?.textContent).not.toContain('写作此章')
+
+    const blankButton = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find(button => button.textContent?.includes('新建空草稿'))
+    expect(blankButton).toBeDefined()
+    await act(async () => blankButton?.click())
+
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        'db:draft-create',
+        expect.objectContaining({ chapterNumber: 3, source: 'manual', content: '', wordCount: 0 }),
+        PROJECT_PATH,
+        expect.objectContaining({ projectPath: PROJECT_PATH }),
+      )
+    })
+    expect(useEditorStore.getState().tabs.some(tab => tab.filePath === 'vela://draft/501')).toBe(true)
+  })
+
+  it('reuses an existing blank manual draft instead of stacking versions', async () => {
+    const invoke = installIpc({
+      blueprints: [blueprint(1)],
+      latestDraft: { id: 42, chapterNumber: 1, version: 3, source: 'manual', status: 'draft', wordCount: 0 },
+    })
+
+    await renderEditor()
+    await vi.waitFor(() => expect(container?.textContent).toContain('新建空草稿'))
+    const blankButton = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find(button => button.textContent?.includes('新建空草稿'))
+    await act(async () => blankButton?.click())
+
+    await vi.waitFor(() => {
+      expect(useEditorStore.getState().tabs.some(tab => tab.filePath === 'vela://draft/42')).toBe(true)
+    })
+    expect(invoke).not.toHaveBeenCalledWith('db:draft-create', expect.anything(), expect.anything(), expect.anything())
   })
 })

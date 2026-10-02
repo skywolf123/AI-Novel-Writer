@@ -4,7 +4,7 @@ import { requireIpcSuccess } from '../ipc-result'
 import { ipc } from '../ipc-client'
 
 import type { DraftStatus } from '../../shared/draft-status'
-import type { ProjectSessionContext } from '../../shared/ipc-channels'
+import type { ProjectSessionContext, DraftWriteSource } from '../../shared/ipc-channels'
 import { sameProjectPathKey } from '../../shared/project-session-context'
 import { FINALIZATION_SHARED_WRITE_RESOURCE_KINDS } from '../../shared/workflow-resource-claims'
 import { normalizeChapterWordsTarget } from './chapter-creation-parameters'
@@ -169,7 +169,7 @@ export async function parseDraftMeta(
     return {
       ...dbMeta,
       status: dbMeta.status as DraftStatus,
-      source: dbMeta.source as 'write' | 'rewrite',
+      source: dbMeta.source as DraftWriteSource,
       fileName: `draft_v${dbMeta.version}.md`,
       filePath: `vela://draft/${dbMeta.id}`,
     } as unknown as DraftMeta

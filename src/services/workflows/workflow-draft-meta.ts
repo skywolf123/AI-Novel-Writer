@@ -1,6 +1,6 @@
 import type { DraftMeta } from '../draft-index'
 import type { DraftStatus } from '../../shared/draft-status'
-import type { ProjectSessionContext } from '../../shared/ipc-channels'
+import type { ProjectSessionContext, DraftWriteSource } from '../../shared/ipc-channels'
 import { ipc } from '../ipc-client'
 
 /**
@@ -25,7 +25,7 @@ export async function readWorkflowDraftMeta(
     return {
       ...dbMeta,
       status: dbMeta.status as DraftStatus,
-      source: dbMeta.source as 'write' | 'rewrite',
+      source: dbMeta.source as DraftWriteSource,
       fileName: `draft_v${dbMeta.version}.md`,
       filePath: `vela://draft/${dbMeta.id}`,
     } as DraftMeta
