@@ -155,7 +155,7 @@ function BatchChapterCreationDialogSession({ isOpen, startChapterNumber, onClose
     const projectSession = captureProjectSession(currentProject)
     if (!projectSession) return
     const projectPath = projectSession.projectPath
-    if (completionMode === 'auto_finalize' && !confirmingAutoFinalize) {
+    if (completionMode !== 'draft_review' && !confirmingAutoFinalize) {
       setConfirmingAutoFinalize(true)
       setError(null)
       return
@@ -263,9 +263,13 @@ function BatchChapterCreationDialogSession({ isOpen, startChapterNumber, onClose
         ? (frozenLocale === 'en-US'
           ? `Batch review drafts started: chapters ${frozenStart}–${frozenEnd} (${frozenChapterCount} total).`
           : `已启动批量草稿待审：第${frozenStart}–${frozenEnd}章（共${frozenChapterCount}章）`)
-        : (frozenLocale === 'en-US'
-          ? `Batch auto-finalize started: chapters ${frozenStart}–${frozenEnd} (${frozenChapterCount} total).`
-          : `已启动批量自动定稿：第${frozenStart}–${frozenEnd}章（共${frozenChapterCount}章）`))
+        : frozenCompletionMode === 'auto_finalize'
+          ? (frozenLocale === 'en-US'
+            ? `Batch auto-finalize started: chapters ${frozenStart}–${frozenEnd} (${frozenChapterCount} total).`
+            : `已启动批量自动定稿：第${frozenStart}–${frozenEnd}章（共${frozenChapterCount}章）`)
+          : (frozenLocale === 'en-US'
+            ? `Batch AI full-pipeline finalize started: chapters ${frozenStart}–${frozenEnd} (${frozenChapterCount} total).`
+            : `已启动批量 AI 全流程定稿：第${frozenStart}–${frozenEnd}章（共${frozenChapterCount}章）`))
       onClose()
     } catch (cause) {
       if (!isProjectSessionCurrent(projectSession)) return
@@ -397,6 +401,26 @@ function BatchChapterCreationDialogSession({ isOpen, startChapterNumber, onClose
                   </span>
                 </span>
               </label>
+              <label className="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-xs" style={{ gridColumn: '1 / -1', borderColor: completionMode === 'ai_pipeline' ? 'var(--color-accent)' : 'var(--color-border)', backgroundColor: completionMode === 'ai_pipeline' ? 'color-mix(in srgb, var(--color-accent) 8%, transparent)' : 'transparent' }}>
+                <input
+                  type="radio"
+                  name="batch-completion-mode"
+                  value="ai_pipeline"
+                  checked={completionMode === 'ai_pipeline'}
+                  onChange={() => {
+                    setCompletionMode('ai_pipeline')
+                    setConfirmingAutoFinalize(false)
+                    setError(null)
+                  }}
+                  disabled={starting}
+                />
+                <span>
+                  <span className="block font-medium">{text('AI 全流程定稿', 'AI full-pipeline finalize')}</span>
+                  <span className="mt-0.5 block" style={{ color: 'var(--color-text-muted)' }}>
+                    {text('AI 修稿、审稿与合并均按默认值自动完成，再定稿。', 'AI revision, review, and merge run with default settings before finalizing.')}
+                  </span>
+                </span>
+              </label>
             </div>
           </fieldset>
 
@@ -427,22 +451,34 @@ function BatchChapterCreationDialogSession({ isOpen, startChapterNumber, onClose
             <div>{text('暂停会在当前章节安全完成后生效；取消会阻止下一章启动。', 'Pause takes effect after the current chapter reaches a safe boundary; cancel prevents the next chapter from starting.')}</div>
             <div>{completionMode === 'draft_review'
               ? text('完成后可从草稿箱进入 AI 审稿、人工确认和修稿闭环。', 'After completion, continue from Drafts into AI review, author confirmation, and revision.')
-              : text('任一后处理步骤最终失败时，任务立即停止，方便先修复数据再继续。', 'The task stops immediately when any post-processing step ultimately fails, so you can repair the data before continuing.')}</div>
+              : completionMode === 'auto_finalize'
+                ? text('任一后处理步骤最终失败时，任务立即停止，方便先修复数据再继续。', 'The task stops immediately when any post-processing step ultimately fails, so you can repair the data before continuing.')
+                : text('每章依次执行：撰写 → AI 修稿 → 完全接受合并 → AI 审稿 → 按默认清单确认 → 修稿 → 完全接受合并 → 定稿。', 'Each chapter runs: draft → AI revision → accept merge → AI review → confirm defaults → revise → accept merge → finalize.')}</div>
           </div>
 
-          {completionMode === 'auto_finalize' && (
+          {completionMode !== 'draft_review' && (
             <div className="flex items-start gap-2 rounded-md px-3 py-2 text-xs" style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning) 12%, transparent)', color: 'var(--color-text)' }}>
               <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} aria-hidden="true" />
               <div className="space-y-1">
-                <p>{text(
-                  '自动定稿会跳过逐章审稿确认，并把章节提交为只读正文；同时发布实体稿并运行角色与连续性后处理。',
-                  'Auto-finalize skips chapter-by-chapter review confirmation, commits read-only chapters, publishes manuscript files, and runs character and continuity post-processing.',
-                )}</p>
-                {confirmingAutoFinalize && (
-                  <p className="font-medium">{text(
-                    `即将自动定稿第${start}–${end}章（共${normalizedCount}章）。完成后章节只读，不能直接编辑。`,
-                    `You are about to auto-finalize Chapters ${start}–${end} (${normalizedCount} total). Completed chapters are read-only and cannot be edited directly.`,
+                <p>{completionMode === 'auto_finalize'
+                  ? text(
+                    '自动定稿会跳过逐章审稿确认，并把章节提交为只读正文；同时发布实体稿并运行角色与连续性后处理。',
+                    'Auto-finalize skips chapter-by-chapter review confirmation, commits read-only chapters, publishes manuscript files, and runs character and continuity post-processing.',
+                  )
+                  : text(
+                    'AI 全流程定稿会自动接受全部 AI 修改点，跳过逐章人工确认，并把章节提交为只读正文；同时发布实体稿并运行角色与连续性后处理。',
+                    'AI full-pipeline finalize accepts every AI change automatically, skips chapter-by-chapter confirmation, commits read-only chapters, publishes manuscript files, and runs character and continuity post-processing.',
                   )}</p>
+                {confirmingAutoFinalize && (
+                  <p className="font-medium">{completionMode === 'auto_finalize'
+                    ? text(
+                      `即将自动定稿第${start}–${end}章（共${normalizedCount}章）。完成后章节只读，不能直接编辑。`,
+                      `You are about to auto-finalize Chapters ${start}–${end} (${normalizedCount} total). Completed chapters are read-only and cannot be edited directly.`,
+                    )
+                    : text(
+                      `即将对第${start}–${end}章（共${normalizedCount}章）执行 AI 全流程定稿：AI 修稿、审稿与合并全部按默认值自动完成。完成后章节只读，不能直接编辑。`,
+                      `You are about to run AI full-pipeline finalize on Chapters ${start}–${end} (${normalizedCount} total): revision, review, and merge all run with default settings. Completed chapters are read-only and cannot be edited directly.`,
+                    )}</p>
                 )}
               </div>
             </div>
@@ -489,8 +525,12 @@ function BatchChapterCreationDialogSession({ isOpen, startChapterNumber, onClose
             {completionMode === 'draft_review'
               ? text('启动批量创作', 'Start batch writing')
               : confirmingAutoFinalize
-                ? text('确认自动定稿并启动', 'Confirm auto-finalize and start')
-                : text('继续确认自动定稿', 'Review auto-finalize')}
+                ? completionMode === 'ai_pipeline'
+                  ? text('确认全流程定稿并启动', 'Confirm full pipeline and start')
+                  : text('确认自动定稿并启动', 'Confirm auto-finalize and start')
+                : completionMode === 'ai_pipeline'
+                  ? text('继续确认全流程定稿', 'Review full pipeline')
+                  : text('继续确认自动定稿', 'Review auto-finalize')}
           </Button>
         </DialogFooter>
       </DialogContent>

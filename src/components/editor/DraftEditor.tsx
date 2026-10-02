@@ -27,6 +27,7 @@ import { retryFinalizationPublication } from '../../services/finalization-client
 import { captureFinalizationSnapshot } from '../../services/finalization-snapshot'
 
 import { DRAFT_STATUS_LABEL, DRAFT_STATUS_COLOR } from '../../shared/draft-status'
+import { REVIEW_FOCUS_DIMENSIONS } from '../../shared/review-report'
 import { countDraftUnits } from '../../shared/draft-units'
 import { PostProcessStatusPanel } from '../ui/PostProcessStatusPanel'
 import { getChapterFinalizeScope } from '../../services/workflows/workflow-utils'
@@ -144,33 +145,30 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const [saving, setSaving] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'refine' | 'review' | null>(null)
   const [userRefinePrompt, setUserRefinePrompt] = useState('')
-  // 审稿维度多选
-  const REVIEW_DIMS = [
-    {
-      key: 'continuity',
+  // 审稿维度多选：维度集合与 promptLabel 与无头批量流水共用同一份定义，
+  // 只有界面文案留在组件内。
+  const REVIEW_DIM_COPY: Record<string, { label: string; desc: string }> = {
+    continuity: {
       label: text('剧情连贯性', 'Story continuity'),
       desc: text('与前文是否矛盾', 'Consistency with earlier chapters'),
-      promptLabel: '剧情连贯性',
     },
-    {
-      key: 'logic',
+    logic: {
       label: text('剧情合理性', 'Story logic'),
       desc: text('因果逻辑、动机、常识', 'Causality, motivation, and plausibility'),
-      promptLabel: '剧情合理性',
     },
-    {
-      key: 'character',
+    character: {
       label: text('角色状态', 'Character state'),
       desc: text('能力/位置/情感一致性', 'Ability, location, and emotional consistency'),
-      promptLabel: '角色状态',
     },
-    {
-      key: 'foreshadow',
+    foreshadow: {
       label: text('前后章节串联', 'Chapter connections'),
       desc: text('伏笔、悬念连贯', 'Foreshadowing and suspense continuity'),
-      promptLabel: '前后章节串联',
     },
-  ]
+  }
+  const REVIEW_DIMS = REVIEW_FOCUS_DIMENSIONS.map(dimension => ({
+    ...dimension,
+    ...(REVIEW_DIM_COPY[dimension.key] ?? { label: dimension.key, desc: '' }),
+  }))
   const [reviewDims, setReviewDims] = useState<Record<string, boolean>>(
     Object.fromEntries(REVIEW_DIMS.map(d => [d.key, true]))
   )

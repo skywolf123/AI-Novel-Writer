@@ -37,6 +37,11 @@ export interface RefineFromReviewParams {
   chapterNumber: number
   /** @deprecated Author guidance must be persisted in the confirmation snapshot. */
   userRefinePrompt?: string
+  /**
+   * The manual review screen opens the produced revision as a merge tab.
+   * Headless orchestrators merge it themselves and opt out. Defaults to true.
+   */
+  openMergeView?: boolean
 }
 
 export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
@@ -293,31 +298,35 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
     ))
 
     const revIndex = createRes.revisionIndex ?? 0
+    context.data.revisionId = createRes.id
+    context.data.revisionIndex = revIndex
 
-    this.assertNotCancelled(context)
-    if (!sameProjectSessionContext(
-      projectSession,
-      projectSessionContextFromProject(useProjectStore.getState().currentProject),
-    )) throw new Error(text(
-      '当前项目已切换，已拒绝打开旧修订稿',
-      'The current project changed, so the stale revision was not opened.',
-    ))
-    const { useEditorStore } = await import('../../../stores/editor-store')
-    useEditorStore.getState().openFile({
-      id: `diff-${this.params.draftPath}-${createRes.id}`,
-      name: text(
-        `审稿修复：第${this.params.chapterNumber}章`,
-        `Review fix: Chapter ${this.params.chapterNumber}`,
-      ),
-      type: 'diff',
-      filePath: this.params.draftPath,
-      originalContent: this.params.draftContent,
-      content: cleanRefined,
-      revisionPath: `vela://revision/${createRes.id}`,
-      chapterNumber: this.params.chapterNumber,
-      chapterDir: `vela://draft/ch${this.params.chapterNumber}`,
-      projectKey: context.projectPath,
-    })
+    if (this.params.openMergeView !== false) {
+      this.assertNotCancelled(context)
+      if (!sameProjectSessionContext(
+        projectSession,
+        projectSessionContextFromProject(useProjectStore.getState().currentProject),
+      )) throw new Error(text(
+        '当前项目已切换，已拒绝打开旧修订稿',
+        'The current project changed, so the stale revision was not opened.',
+      ))
+      const { useEditorStore } = await import('../../../stores/editor-store')
+      useEditorStore.getState().openFile({
+        id: `diff-${this.params.draftPath}-${createRes.id}`,
+        name: text(
+          `审稿修复：第${this.params.chapterNumber}章`,
+          `Review fix: Chapter ${this.params.chapterNumber}`,
+        ),
+        type: 'diff',
+        filePath: this.params.draftPath,
+        originalContent: this.params.draftContent,
+        content: cleanRefined,
+        revisionPath: `vela://revision/${createRes.id}`,
+        chapterNumber: this.params.chapterNumber,
+        chapterDir: `vela://draft/ch${this.params.chapterNumber}`,
+        projectKey: context.projectPath,
+      })
+    }
 
     callbacks.log(text(
       `审稿修复完成（${countDraftUnits(cleanRefined)} 字），已生成修订稿版本 r${revIndex}`,
