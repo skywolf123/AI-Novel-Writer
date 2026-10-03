@@ -313,6 +313,17 @@ export class DraftRepository {
 
         // 事务内原子分配 version，避免 getNextVersion + create 竞态
         const tx = db.transaction(() => {
+            // 手动空草稿是重写入口，不能与既有定稿共存：同章出现第二份定稿会让
+            // 权威序列判为重复、锁死后续写作，且后处理数据按章节号覆盖，删除也
+            // 无法回归。这里与 DELETE 位于同一权威事务，拒绝已在确认期间定稿的章。
+            if (params.source === 'manual') {
+                const finalized = db.prepare(`
+          SELECT 1 FROM drafts WHERE chapter_number = ? AND status = 'finalized' LIMIT 1
+        `).get(params.chapterNumber)
+                if (finalized) {
+                    throw new Error('本章已定稿，不能新建空草稿；如需重写请先在正文章节删除这一稿')
+                }
+            }
             const serializedDependencies = JSON.stringify(params.sourceDependencies ?? [])
             const parsedDependencies = parseDependencies(serializedDependencies)
             if (!parsedDependencies.valid) throw new Error('草稿来源依赖无效')
