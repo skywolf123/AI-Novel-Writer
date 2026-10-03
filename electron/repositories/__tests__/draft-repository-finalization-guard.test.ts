@@ -22,10 +22,11 @@ beforeEach(() => {
       id INTEGER PRIMARY KEY,
       chapter_number INTEGER NOT NULL,
       version INTEGER NOT NULL,
-      status TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
       source TEXT NOT NULL DEFAULT 'write',
       content_id INTEGER NOT NULL,
       word_count INTEGER NOT NULL,
+      source_dependencies TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL DEFAULT ''
     );
@@ -119,5 +120,35 @@ describe('DraftRepository finalized immutability guard', () => {
     })
     expect(db.prepare('SELECT finalization_id FROM finalization_outbox WHERE draft_id = 1').get())
       .toEqual({ finalization_id: 'finalization-1' })
+  })
+
+  it('refuses a manual blank draft once the chapter already has a finalized draft', () => {
+    expect(() => DraftRepository.create({
+      chapterNumber: 1,
+      source: 'manual',
+      content: '',
+      wordCount: 0,
+    })).toThrow('本章已定稿')
+
+    // 未产生新的草稿行，既有定稿事实保持不变。
+    expect(db.prepare('SELECT COUNT(*) AS count FROM drafts WHERE chapter_number = 1').get())
+      .toEqual({ count: 1 })
+  })
+
+  it('still allows a manual blank draft on a chapter with no finalized draft', () => {
+    const id = DraftRepository.create({
+      chapterNumber: 2,
+      source: 'manual',
+      content: '',
+      wordCount: 0,
+    })
+
+    expect(DraftRepository.getMeta(id)).toMatchObject({
+      chapterNumber: 2,
+      version: 1,
+      status: 'draft',
+      source: 'manual',
+      wordCount: 0,
+    })
   })
 })

@@ -346,6 +346,27 @@ describe('ChapterCardEditor writing entry', () => {
     expect(useEditorStore.getState().tabs.some(tab => tab.filePath === 'vela://draft/501')).toBe(true)
   })
 
+  it('refuses a new blank draft when the chapter is already finalized', async () => {
+    const invoke = installIpc({
+      blueprints: [blueprint(1)],
+      finalizedChapter: (chapterNumber) => (chapterNumber === 1 ? { id: 9 } : null),
+    })
+    const errorSpy = vi.spyOn(toast, 'error').mockImplementation(() => undefined)
+
+    await renderEditor()
+    await vi.waitFor(() => expect(container?.textContent).toContain('新建空草稿'))
+    const blankButton = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find(button => button.textContent?.includes('新建空草稿'))
+    await act(async () => blankButton?.click())
+
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('已定稿，不能新建空草稿'))
+    })
+    expect(invoke).not.toHaveBeenCalledWith('db:draft-create', expect.anything(), expect.anything(), expect.anything())
+    expect(useEditorStore.getState().tabs).toHaveLength(0)
+    errorSpy.mockRestore()
+  })
+
   it('reuses an existing blank manual draft instead of stacking versions', async () => {
     const invoke = installIpc({
       blueprints: [blueprint(1)],

@@ -660,6 +660,22 @@ export default function ChapterCardEditor({
     const chapterNumber = selected.chapterNumber
     setSaving(true)
     try {
+      // 与主进程写入事务同一约束的前置提示：同章已有定稿时不允许再起手写稿，
+      // 否则会产生重复定稿、锁死后续写作。
+      const existingFinalized = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:draft-get-finalized',
+        chapterNumber,
+        projectKey,
+      )
+      if (!isCurrentProjectSession(projectSession)) return
+      if (existingFinalized) {
+        toast.error(text(
+          `第 ${chapterNumber} 章已定稿，不能新建空草稿。\n\n如需重写，请先在「正文章节」中删除这一稿，再新建空草稿。`,
+          `Chapter ${chapterNumber} is already finalized, so a blank draft cannot be created.\n\nTo rewrite it, delete the finalized chapter under Manuscript first.`,
+        ))
+        return
+      }
       const result = await createManualBlankDraft(chapterNumber, projectSession)
       if (!isCurrentProjectSession(projectSession)) return
       await useDraftStore.getState().loadChapterDrafts(chapterNumber, projectKey, projectSession)
