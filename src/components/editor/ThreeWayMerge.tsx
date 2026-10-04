@@ -6,10 +6,16 @@
  * - DP 动态规划支持 1:1、1:2、1:3、2:1、3:1 段落对齐
  * - 正确处理段落拆分（1段→2段）和合并（2段→1段）
  *
+ * v2 增强：
+ * - 字符级高亮：hunk 内行 LCS 配对 + diff-match-patch 行内 diff
+ * - hunk 导航：‹ › 按钮 / Alt+↑↓ / F3 / Enter 采纳，自动定位首处变更
+ * - 未变更区域折叠：超长 same 段默认收起，点击展开
+ *
  * 布局：左栏原稿（只读）| 中栏合并结果（可编辑）| 右栏修稿（只读）
  */
-import React, { useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react'
+import React, { useState, useCallback, useRef, useMemo, useLayoutEffect, useEffect } from 'react'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { diff_match_patch } from 'diff-match-patch'
 import { Button } from '../ui/Button'
 import { useLocaleStore } from '../../stores/locale-store'
 import './three-way-merge.css'
@@ -269,22 +275,118 @@ function computeSegments(original: string, modified: string): DiffSegment[] {
   return buildSegments(origParas, modParas, pairs)
 }
 
-// ===== 渲染辅助 =====
+// ===== 字符级行内 diff =====
 
-function HunkLines({ lines, padCount, cls, emptyLabel }: {
-  lines: string[]; padCount: number; cls: string; emptyLabel: string
-}) {
-  return (
-    <>
-      {lines.length > 0
-        ? lines.map((l, i) => <div key={i} className={cls}>{l || '\u00A0'}</div>)
-        : <div className="twm-line-placeholder">{emptyLabel}</div>}
-      {Array.from({ length: padCount }).map((_, i) => (
-        <div key={`p${i}`} className="twm-line-padding">{'\u00A0'}</div>
-      ))}
-    </>
-  )
+export interface CharSpan {
+  type: 'same' | 'del' | 'add'
+  text: string
 }
+
+/** dmp 单例（diff_main 无跨调用状态） */
+const dmp = new diff_match_patch()
+
+/**
+ * 行内字符级 diff：对一对改写行产出左（原稿）/右（修稿）两栏的 span 序列
+ * left 含 same+del 段，right 含 same+add 段
+ */
+export function diffLineChars(orig: string, mod: string): { left: CharSpan[]; right: CharSpan[] } {
+  const diffs = dmp.diff_main(orig, mod)
+  dmp.diff_cleanupSemantic(diffs)
+  const left: CharSpan[] = []
+  const right: CharSpan[] = []
+  for (const [op, t] of diffs) {
+    if (op === 0) {
+      left.push({ type: 'same', text: t })
+      right.push({ type: 'same', text: t })
+    } else if (op < 0) {
+      left.push({ type: 'del', text: t })
+    } else {
+      right.push({ type: 'add', text: t })
+    }
+  }
+  return { left, right }
+}
+
+export interface LinePair {
+  /** 原稿行；undefined 表示该行在原稿中不存在（新增） */
+  o?: string
+  /** 修稿行；undefined 表示该行被删除 */
+  m?: string
+}
+
+/**
+ * hunk 内行配对：
+ * 1. 行 LCS 配出相等行
+ * 2. 相邻的删除块/插入块按顺序 zip 成修改对（供字符级 diff）
+ */
+export function pairHunkLines(orig: string[], mod: string[]): LinePair[] {
+  const n = orig.length, m = mod.length
+  if (n === 0 && m === 0) return []
+
+  // 防护：行列积过大时退化为按位 zip（正常段落不会触发）
+  if (n * m > 250_000) {
+    const pairs: LinePair[] = []
+    const len = Math.max(n, m)
+    for (let i = 0; i < len; i++) pairs.push({ o: orig[i], m: mod[i] })
+    return pairs
+  }
+
+  // 行 LCS DP
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = orig[i] === mod[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+
+  // 回溯：相等行配对，其余产出单边行
+  const raw: LinePair[] = []
+  let i = 0, j = 0
+  while (i < n && j < m) {
+    if (orig[i] === mod[j]) { raw.push({ o: orig[i], m: mod[j] }); i++; j++ }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { raw.push({ o: orig[i] }); i++ }
+    else { raw.push({ m: mod[j] }); j++ }
+  }
+  while (i < n) { raw.push({ o: orig[i] }); i++ }
+  while (j < m) { raw.push({ m: mod[j] }); j++ }
+
+  // 后处理：相邻 del-run + add-run zip 成修改对
+  const out: LinePair[] = []
+  let k = 0
+  while (k < raw.length) {
+    const p = raw[k]
+    if (p.o !== undefined && p.m !== undefined) { out.push(p); k++; continue }
+    const delRun: string[] = []
+    let a = k
+    while (a < raw.length && raw[a].o !== undefined && raw[a].m === undefined) { delRun.push(raw[a].o!); a++ }
+    const addRun: string[] = []
+    let b = a
+    while (b < raw.length && raw[b].m !== undefined && raw[b].o === undefined) { addRun.push(raw[b].m!); b++ }
+    if (delRun.length > 0 && addRun.length > 0) {
+      const len = Math.max(delRun.length, addRun.length)
+      for (let x = 0; x < len; x++) out.push({ o: delRun[x], m: addRun[x] })
+      k = b
+    } else {
+      out.push(p)
+      k++
+    }
+  }
+  return out
+}
+
+/** 统计一个 hunk 的变更行数（改写行在两侧各计一次） */
+export function hunkChurn(pairs: LinePair[]): { del: number; add: number } {
+  let del = 0, add = 0
+  for (const p of pairs) {
+    if (p.o !== undefined && (p.m === undefined || p.o !== p.m)) del++
+    if (p.m !== undefined && (p.o === undefined || p.o !== p.m)) add++
+  }
+  return { del, add }
+}
+
+// ===== 渲染辅助 =====
 
 /** contentEditable 子组件 — 仅在挂载时设置内容 */
 function EditableCell({ text, onChange }: { text: string; onChange: (t: string) => void }) {
@@ -300,6 +402,43 @@ function EditableCell({ text, onChange }: { text: string; onChange: (t: string) 
   )
 }
 
+const PairLine = React.memo(function PairLine({ pair, side }: { pair: LinePair; side: 'left' | 'right' }) {
+  const mine = side === 'left' ? pair.o : pair.m
+  const other = side === 'left' ? pair.m : pair.o
+  // 本侧无此行：对侧新增/删除的占位
+  if (mine === undefined) return <div className="twm-line-padding">{'\u00A0'}</div>
+  const cls = side === 'left' ? 'twm-line-removed' : 'twm-line-added'
+  // 纯增/删行：整行标色
+  if (other === undefined) return <div className={cls}>{mine || '\u00A0'}</div>
+  // hunk 内未变行
+  if (mine === other) return <div className="twm-line-same">{mine || '\u00A0'}</div>
+  // 改写行：字符级高亮
+  const spans = side === 'left'
+    ? diffLineChars(pair.o!, pair.m!).left
+    : diffLineChars(pair.o!, pair.m!).right
+  return (
+    <div className={cls}>
+      {spans.map((s, i) =>
+        s.type === 'same'
+          ? <React.Fragment key={i}>{s.text}</React.Fragment>
+          : <span key={i} className={side === 'left' ? 'twm-char-del' : 'twm-char-add'}>{s.text}</span>)}
+    </div>
+  )
+})
+
+/** hunk 单栏渲染：整侧无行时显示占位说明 */
+function PairColumn({ pairs, side, emptyLabel }: {
+  pairs: LinePair[]; side: 'left' | 'right'; emptyLabel: string
+}) {
+  const sideEmpty = pairs.every(p => (side === 'left' ? p.o : p.m) === undefined)
+  if (sideEmpty) return <div className="twm-line-placeholder">{emptyLabel}</div>
+  return <>{pairs.map((p, i) => <PairLine key={i} pair={p} side={side} />)}</>
+}
+
+// ===== 折叠参数 =====
+const COLLAPSE_MIN = 8 // same 段超过此行数默认折叠
+const COLLAPSE_KEEP = 3 // 折叠时首尾各保留行数
+
 // ===== 主组件 =====
 
 export default function ThreeWayMerge({
@@ -309,6 +448,23 @@ export default function ThreeWayMerge({
   const segments = useMemo(() => computeSegments(originalContent, modifiedContent),
     [originalContent, modifiedContent])
   const hunks = useMemo(() => segments.filter(s => s.type === 'hunk').map(s => s.hunk!), [segments])
+
+  // hunk 内行配对（缓存，供渲染与统计复用）
+  const hunkPairs = useMemo(() => {
+    const map = new Map<number, LinePair[]>()
+    hunks.forEach(h => map.set(h.index, pairHunkLines(h.originalLines, h.modifiedLines)))
+    return map
+  }, [hunks])
+
+  // 全文变更行数统计
+  const churn = useMemo(() => {
+    let del = 0, add = 0
+    hunks.forEach(h => {
+      const c = hunkChurn(hunkPairs.get(h.index) ?? [])
+      del += c.del; add += c.add
+    })
+    return { del, add }
+  }, [hunks, hunkPairs])
 
   const [applied, setApplied] = useState<Record<number, boolean>>({})
 
@@ -361,19 +517,88 @@ export default function ThreeWayMerge({
 
   const processedCount = Object.values(applied).filter(Boolean).length
 
-  const getPad = (oLen: number, mLen: number) => {
-    const lV = oLen > 0 ? oLen : 1, rV = mLen > 0 ? mLen : 1
-    return { leftPad: Math.max(0, rV - lV), rightPad: Math.max(0, lV - rV) }
-  }
+  // ===== hunk 导航 =====
+  const hunkCellRefs = useRef(new Map<number, HTMLDivElement>())
+  const setHunkRef = useCallback((index: number, el: HTMLDivElement | null) => {
+    if (el) hunkCellRefs.current.set(index, el)
+    else hunkCellRefs.current.delete(index)
+  }, [])
+
+  const [navPos, setNavPos] = useState(0)
+  const navPosRef = useRef(0)
+  navPosRef.current = navPos
+
+  const goToHunk = useCallback((i: number, behavior: ScrollBehavior = 'smooth') => {
+    if (hunks.length === 0) return
+    const pos = ((i % hunks.length) + hunks.length) % hunks.length
+    setNavPos(pos)
+    hunkCellRefs.current.get(hunks[pos].index)
+      ?.scrollIntoView({ block: 'center', behavior })
+  }, [hunks])
+
+  // 打开视图时自动定位到第一处变更
+  useEffect(() => {
+    if (hunks.length === 0) return
+    const id = requestAnimationFrame(() => goToHunk(0, 'auto'))
+    return () => cancelAnimationFrame(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 键盘快捷键：焦点在输入/编辑区时不响应
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as HTMLElement | null
+      if (el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+      if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); goToHunk(navPosRef.current + 1) }
+      else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); goToHunk(navPosRef.current - 1) }
+      else if (e.key === 'F3') { e.preventDefault(); goToHunk(navPosRef.current + (e.shiftKey ? -1 : 1)) }
+      else if (e.key === 'Enter' && hunks.length > 0) { e.preventDefault(); toggleHunk(hunks[navPosRef.current].index) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [goToHunk, toggleHunk, hunks.length])
+
+  // ===== 未变更区域折叠 =====
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const toggleExpanded = useCallback((idx: number) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }, [])
+
+  /** 静态行渲染（左/中/右栏复用） */
+  const renderStaticLines = (ls: string[], keyPrefix: string) =>
+    ls.map((l, i) => <div key={keyPrefix + i} className="twm-line-same">{l || '\u00A0'}</div>)
 
   return (
     <div className="three-way-merge">
       <div className="twm-toolbar">
         <Button variant="ghost" size="sm" onClick={revertAll}><ArrowLeft size={13} />{text('全部原稿', 'Use all original')}</Button>
         <Button variant="ghost" size="sm" onClick={applyAll}>{text('全部修稿', 'Use all revision')}<ArrowRight size={13} /></Button>
-        <span className="twm-toolbar-progress">{text('已采用 {done}/{total} 处变更', '{done}/{total} changes applied', { done: processedCount, total: hunks.length })}</span>
-        {onCancel && <Button variant="ghost" size="sm" onClick={onCancel}>{text('取消', 'Cancel')}</Button>}
-        <Button variant="success" size="sm" onClick={() => onComplete(buildMergedText())}>{text('完成合并', 'Finish merge')}</Button>
+        {hunks.length > 0 && (
+          <span className="twm-nav">
+            <button className="twm-nav-btn" onClick={() => goToHunk(navPos - 1)}
+              title={text('上一处变更 (Alt+↑)', 'Previous change (Alt+↑)')}>
+              <ChevronUp size={14} aria-hidden="true" />
+            </button>
+            <span className="twm-nav-pos">{navPos + 1}/{hunks.length}</span>
+            <button className="twm-nav-btn" onClick={() => goToHunk(navPos + 1)}
+              title={text('下一处变更 (Alt+↓)', 'Next change (Alt+↓)')}>
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+          </span>
+        )}
+        <span className="twm-toolbar-right">
+          <span className="twm-toolbar-progress">
+            {text('已采用 {done}/{total} 处变更', '{done}/{total} changes applied', { done: processedCount, total: hunks.length })}
+            {(churn.del > 0 || churn.add > 0) && <span> · +{churn.add} −{churn.del}</span>}
+          </span>
+          {onCancel && <Button variant="ghost" size="sm" onClick={onCancel}>{text('取消', 'Cancel')}</Button>}
+          <Button variant="success" size="sm" onClick={() => onComplete(buildMergedText())}>{text('完成合并', 'Finish merge')}</Button>
+        </span>
       </div>
 
       {/* 固定表头 */}
@@ -388,19 +613,54 @@ export default function ThreeWayMerge({
         <div className="twm-grid">
           {segments.map((seg, idx) => {
             if (seg.type === 'same') {
-              // same 行：三栏静态文本，中栏可编辑
+              const lines = seg.lines ?? []
+              const lineCount = lines.length
+              const isCollapsible = lineCount > COLLAPSE_MIN
+              const isCollapsed = isCollapsible && !expanded.has(idx)
+
+              // 折叠：首尾保留上下文，中间显示展开按钮
+              if (isCollapsed) {
+                const head = lines.slice(0, COLLAPSE_KEEP)
+                const tail = lines.slice(lineCount - COLLAPSE_KEEP)
+                const hidden = lineCount - COLLAPSE_KEEP * 2
+                return (
+                  <React.Fragment key={idx}>
+                    <div className="twm-cell twm-cell-left">{renderStaticLines(head, 'hl')}</div>
+                    <div className="twm-cell twm-cell-center">{renderStaticLines(head, 'hc')}</div>
+                    <div className="twm-cell twm-cell-right">{renderStaticLines(head, 'hr')}</div>
+                    <div className="twm-collapse-row" style={{ gridColumn: '1 / -1' }}>
+                      <button className="twm-collapse-btn" onClick={() => toggleExpanded(idx)}>
+                        <ChevronDown size={12} aria-hidden="true" />
+                        {text('展开其余 {n} 行', 'Expand {n} more lines', { n: hidden })}
+                      </button>
+                    </div>
+                    <div className="twm-cell twm-cell-left">{renderStaticLines(tail, 'tl')}</div>
+                    <div className="twm-cell twm-cell-center">{renderStaticLines(tail, 'tc')}</div>
+                    <div className="twm-cell twm-cell-right">{renderStaticLines(tail, 'tr')}</div>
+                  </React.Fragment>
+                )
+              }
+
               return (
                 <React.Fragment key={idx}>
                   <div className="twm-cell twm-cell-left">
-                    {seg.lines?.map((l, i) => <div key={i} className="twm-line-same">{l || '\u00A0'}</div>)}
+                    {renderStaticLines(lines, 'l')}
                   </div>
                   <div className="twm-cell twm-cell-center">
                     <EditableCell key={`s${idx}`} text={segTexts[idx] ?? ''}
                       onChange={t => setSegTexts(p => ({ ...p, [idx]: t }))} />
                   </div>
                   <div className="twm-cell twm-cell-right">
-                    {seg.lines?.map((l, i) => <div key={i} className="twm-line-same">{l || '\u00A0'}</div>)}
+                    {renderStaticLines(lines, 'r')}
                   </div>
+                  {isCollapsible && (
+                    <div className="twm-collapse-row" style={{ gridColumn: '1 / -1' }}>
+                      <button className="twm-collapse-btn" onClick={() => toggleExpanded(idx)}>
+                        <ChevronUp size={12} aria-hidden="true" />
+                        {text('收起未变更区域', 'Collapse unchanged')}
+                      </button>
+                    </div>
+                  )}
                 </React.Fragment>
               )
             }
@@ -408,13 +668,14 @@ export default function ThreeWayMerge({
             // hunk 行
             const hunk = seg.hunk!
             const isApplied = applied[hunk.index]
-            const { leftPad, rightPad } = getPad(hunk.originalLines.length, hunk.modifiedLines.length)
+            const pairs = hunkPairs.get(hunk.index) ?? []
 
             return (
               <React.Fragment key={idx}>
                 {/* 左栏 */}
-                <div className={`twm-cell twm-cell-left ${isApplied ? 'processed' : ''}`}>
-                  <HunkLines lines={hunk.originalLines} padCount={leftPad} cls="twm-line-removed"
+                <div ref={el => setHunkRef(hunk.index, el)}
+                  className={`twm-cell twm-cell-left ${isApplied ? 'processed' : ''}`}>
+                  <PairColumn pairs={pairs} side="left"
                     emptyLabel={`（新增 ${hunk.modifiedLines.length} 行）`} />
                 </div>
 
@@ -435,7 +696,7 @@ export default function ThreeWayMerge({
                         : <ArrowLeft size={14} aria-hidden="true" />}
                     </button>
                     <div className="twm-hunk-text">
-                      <HunkLines lines={hunk.modifiedLines} padCount={rightPad} cls="twm-line-added"
+                      <PairColumn pairs={pairs} side="right"
                         emptyLabel={`（删除 ${hunk.originalLines.length} 行）`} />
                     </div>
                   </div>

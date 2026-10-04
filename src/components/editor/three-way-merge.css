@@ -21,10 +21,15 @@
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
+.twm-toolbar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
 .twm-toolbar-progress {
   font-size: 0.75rem;
   color: var(--color-text-secondary);
-  margin-left: auto;
 }
 
 /* 固定表头 */
@@ -180,4 +185,70 @@
 .twm-hunk-text {
   flex: 1;
   min-width: 0;
+}
+
+/* ===== v2 增强:字符级高亮 / hunk 导航 / 折叠 ===== */
+.twm-char-del {
+  background: color-mix(in srgb, var(--color-error) 28%, transparent);
+  border-radius: 2px;
+}
+.twm-char-add {
+  background: color-mix(in srgb, var(--color-success) 28%, transparent);
+  border-radius: 2px;
+}
+
+/* hunk 导航 */
+.twm-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.twm-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.twm-nav-btn:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+.twm-nav-pos {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  min-width: 34px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 未变更区域折叠 */
+.twm-collapse-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0;
+  background: color-mix(in srgb, var(--color-text-muted) 4%, transparent);
+}
+.twm-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+.twm-collapse-btn:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
 }
