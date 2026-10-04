@@ -87,7 +87,7 @@ export class RevisionRepository {
      */
     static create(params: {
         baseDraftId: number
-        revisionType: 'refine' | 'review-fix'
+        revisionType: 'refine' | 'review-fix' | 'polish'
         userPrompt?: string
         reviewSourceId?: number
         content: string
@@ -138,7 +138,7 @@ export class RevisionRepository {
      */
     static replacePending(params: {
         baseDraftId: number
-        revisionType: 'refine' | 'review-fix'
+        revisionType: 'refine' | 'review-fix' | 'polish'
         userPrompt?: string
         reviewSourceId?: number
         content: string

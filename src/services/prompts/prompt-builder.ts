@@ -165,6 +165,24 @@ export class ChapterPromptBuilder extends BasePromptBuilder {
     this.variables.knowledge_query_hint = hint;
     return this;
   }
+
+  /** 作者额外润色要求（AI 润色入口，可选） */
+  withUserPolishPrompt(userPolishPrompt: string) {
+    this.variables.user_polish_prompt = userPolishPrompt;
+    return this;
+  }
+
+  /** 上一稿质量反馈（AI 润色全篇重润时注入，可选） */
+  withPolishFeedback(polishFeedback: string) {
+    this.variables.polish_feedback = polishFeedback;
+    return this;
+  }
+
+  /** 定点修复问题清单（AI 润色局部修正用） */
+  withProblemList(problemList: string) {
+    this.variables.problem_list = problemList;
+    return this;
+  }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Sparkles, Search, BadgeCheck, Save, FileStack, FileText, Wrench, Check } from 'lucide-react'
+import { Sparkles, Search, BadgeCheck, Save, FileStack, FileText, Wrench, Check, Wand2 } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
@@ -54,7 +54,7 @@ interface Props {
 
 /**
  * 草稿编辑器
- * — 顶部工具栏：草稿状态 + 待合并修稿 + AI 修稿(含自定义提示词) / AI 审稿 / 定稿
+ * — 顶部工具栏：草稿状态 + 待合并修稿 + AI 修稿(含自定义提示词) / AI 润色(含额外润色要求) / AI 审稿 / 定稿
  * — 正文：CodeMirrorEditor（prose 模式）
  */
 export default function DraftEditor(props: Props) {
@@ -142,8 +142,9 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const isChapterBusy = !!activeChapterRun
 
   const [saving, setSaving] = useState(false)
-  const [confirmAction, setConfirmAction] = useState<'refine' | 'review' | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'refine' | 'review' | 'polish' | null>(null)
   const [userRefinePrompt, setUserRefinePrompt] = useState('')
+  const [userPolishPrompt, setUserPolishPrompt] = useState('')
   // 审稿维度多选
   const REVIEW_DIMS = [
     {
@@ -323,6 +324,33 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     } catch (e) {
       if (!isProjectSessionCurrent(projectSession)) return
       toast.error(text(`修稿启动失败：${e}`, 'Could not start AI revision.'))
+    }
+  }
+
+  /** 执行 AI 润色（含额外润色要求，全自动多轮） */
+  const doPolish = async () => {
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectMatches || !currentProject || !meta || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+    try {
+      const source = await freezeDraftSourceForAI(projectSession)
+      if (!source || !isProjectSessionCurrent(projectSession)) return
+      const { useWorkflowStore } = await import('../../stores/workflow-store')
+      const { createPolishOnlyWorkflow } = await import('../../services/workflows/chapter-workflow')
+      if (!isProjectSessionCurrent(projectSession)) return
+      if (!isFrozenAISourceCurrent(source.body, source.sourceDraft)) return
+
+      useWorkflowStore.getState().startWorkflow(createPolishOnlyWorkflow({
+        projectPath: projectSession.projectPath,
+        chapterNumber: meta.chapterNumber,
+        chapterTitle: meta.chapterTitle ?? '未知标题',
+        draftPath: filePath,
+        draftContent: source.body,
+        sourceDraft: source.sourceDraft,
+        userPolishPrompt: userPolishPrompt.trim() || undefined,
+      }, projectSession), false)
+    } catch (e) {
+      if (!isProjectSessionCurrent(projectSession)) return
+      toast.error(text(`润色启动失败：${e}`, 'Could not start AI polish.'))
     }
   }
 
@@ -761,6 +789,18 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 {text('AI 修稿', 'AI revise')}
             </Button>
 
+            {/* AI 润色 */}
+            <Button
+              variant="ai"
+              size="sm"
+              onClick={() => { setUserPolishPrompt(''); setConfirmAction('polish') }}
+              disabled={isChapterBusy}
+                title={text('AI 润色 — 全自动多轮去 AI 味润色：全篇润色 → 质量门控 → 整篇重润或定点修复', 'AI polish — fully automatic multi-round de-AI-flavor polishing: full polish → quality gate → re-polish or spot fixes')}
+            >
+              <Wand2 size={12} />
+                {text('AI 润色', 'AI polish')}
+            </Button>
+
             {/* AI 审稿 */}
             <Button
               variant="ai"
@@ -866,7 +906,9 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               <Sparkles size={15} className="text-[var(--color-accent)]" />
               {confirmAction === 'refine'
                 ? text('AI 修稿确认', 'Confirm AI revision')
-                : text('AI 审稿确认', 'Confirm AI review')}
+                : confirmAction === 'polish'
+                  ? text('AI 润色确认', 'Confirm AI polish')
+                  : text('AI 审稿确认', 'Confirm AI review')}
             </DialogTitle>
             <DialogDescription>
               {text('对象：', 'Target: ')}{meta
@@ -880,6 +922,12 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 <div className="font-medium text-[var(--color-text)]">{text('本次【直接修稿】范围：', 'This direct revision will:')}</div>
                 <div>{text('1. 全文基础润色、词汇优化，增强画面与表现力。', '1. Polish the full chapter, improve wording, and strengthen imagery and expression.')}</div>
                 <div>{text('2. 可在下方指定的额外修稿要求。', '2. Follow any additional revision instructions below.')}</div>
+              </>
+            ) : confirmAction === 'polish' ? (
+              <>
+                <div className="font-medium text-[var(--color-text)]">{text('本次【AI 润色】将自动执行：', 'This AI polish runs automatically:')}</div>
+                <div>{text('1. 全篇润色 → 质量门控 → 按判定整篇重润或定点修复（最多 3 轮，全程自动，无人工确认）。', '1. Full polish → quality gate → gate-driven re-polish or spot fixes (max 3 rounds, fully automatic).')}</div>
+                <div>{text('2. 只保留胜出稿，生成修订并打开合并视图；可在下方指定额外润色要求。', '2. Only the winning draft is kept, saved as a revision, and opened in the merge view. Optional polish guidance below.')}</div>
               </>
             ) : (
               <>
@@ -918,7 +966,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             )}
           </div>
 
-          {/* 修稿时显示自定义提示词输入框 */}
+          {/* 修稿/润色时显示自定义提示词输入框 */}
           {confirmAction === 'refine' && (
             <div className="px-5 pb-2">
               <label className="text-xs font-medium block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
@@ -944,6 +992,31 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             </div>
           )}
 
+          {confirmAction === 'polish' && (
+            <div className="px-5 pb-2">
+              <label className="text-xs font-medium block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {text('额外润色要求（可选，全程生效）：', 'Additional polish guidance (optional, applies to every round):')}
+              </label>
+              <textarea
+                className="w-full px-3 py-2 rounded-md text-sm"
+                style={{
+                  background: 'var(--color-bg-elevated)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text)',
+                  minHeight: 72,
+                  resize: 'vertical',
+                  outline: 'none',
+                }}
+                placeholder={text(
+                  '例如：全文去 AI 味，删除"仿佛/一丝"式套话；对白再口语化一点；保持短句节奏...',
+                  'For example: remove AI-flavored phrasing throughout; make dialogue more colloquial; keep the short-sentence rhythm...',
+                )}
+                value={userPolishPrompt}
+                onChange={e => setUserPolishPrompt(e.target.value)}
+              />
+            </div>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmAction(null)}>{text('取消', 'Cancel')}</Button>
             <Button
@@ -952,6 +1025,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 const act = confirmAction
                 setConfirmAction(null)
                 if (act === 'refine') doRefine()
+                else if (act === 'polish') doPolish()
                 else if (act === 'review') doReview()
               }}
             >
