@@ -59,6 +59,16 @@ export interface RefineOnlyParams {
   userRefinePrompt?: string
 }
 
+export interface PolishOnlyParams {
+  projectPath: string
+  chapterNumber: number
+  chapterTitle: string
+  draftPath: string
+  draftContent: string
+  sourceDraft: FrozenDraftSourceIdentity
+  userPolishPrompt?: string
+}
+
 export interface RefineFromReviewParams {
   projectPath: string
   chapterNumber: number
@@ -307,6 +317,52 @@ export function createRefineOnlyWorkflow(
             chapterNumber: frozenParams.chapterNumber,
             chapterInfo: { projectPath: frozenParams.projectPath, chapterNumber: frozenParams.chapterNumber, title: frozenParams.chapterTitle, role: '', purpose: '', characters: [], keyEvents: '' },
             userRefinePrompt: frozenParams.userRefinePrompt,
+          })
+          return cmd.execute({ step, context, callbacks })
+        },
+      },
+    ],
+    onComplete: { mode: 'open', openResult: async () => { } },
+  }
+}
+
+export function createPolishOnlyWorkflow(
+  params: PolishOnlyParams,
+  sourceProjectSession: ProjectSessionContext,
+): WorkflowDefinition {
+  const uiLocale = chapterWorkflowLocale()
+  const frozenParams = Object.freeze({
+    ...params,
+    sourceDraft: Object.freeze({ ...params.sourceDraft }),
+  })
+  return {
+    type: 'chapter_creation',
+    projectPath: params.projectPath,
+    projectSession: workflowProjectSession(params.projectPath, sourceProjectSession),
+    uiLocale,
+    resourceKeys: [workflowResourceKey('chapter', params.chapterNumber)],
+    readResourceKeys: CHAPTER_CONTEXT_READ_RESOURCE_KEYS,
+    title: localize(uiLocale,
+      `润色 — 第${params.chapterNumber}章 ${params.chapterTitle}`,
+      `Polish — Chapter ${params.chapterNumber} ${params.chapterTitle}`,
+    ),
+    steps: [
+      {
+        name: localize(uiLocale, 'AI 润色', 'AI polish'),
+        description: localize(
+          uiLocale,
+          '全自动多轮润色：全篇润色、质量门控、按判定整篇重润或定点修复，只保留胜出稿并打开合并视图',
+          'Fully automatic multi-round polishing: full polish, quality gates, gate-driven re-polish or spot fixes; keeps only the winning draft and opens the merge view',
+        ),
+        executor: async (step, context, callbacks) => {
+          const { PolishChapterCommand } = await import('./commands/polish-chapter.command')
+          const cmd = new PolishChapterCommand({
+            draftPath: frozenParams.draftPath,
+            draftContent: frozenParams.draftContent,
+            sourceDraft: frozenParams.sourceDraft,
+            chapterNumber: frozenParams.chapterNumber,
+            chapterInfo: { projectPath: frozenParams.projectPath, chapterNumber: frozenParams.chapterNumber, title: frozenParams.chapterTitle, role: '', purpose: '', characters: [], keyEvents: '' },
+            userPolishPrompt: frozenParams.userPolishPrompt,
           })
           return cmd.execute({ step, context, callbacks })
         },
