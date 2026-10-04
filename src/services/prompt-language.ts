@@ -37,6 +37,9 @@ export const CORE_LOCALIZED_BUILTIN_PROMPT_KEYS = Object.freeze([
   'first_chapter_draft',
   'next_chapter_draft',
   'refine_chapter',
+  'polish_chapter',
+  'polish_spot_fix',
+  'polish_gate',
   'consistency_check',
   'refine_from_review',
   'generate_chapter_notes',
@@ -416,6 +419,117 @@ Return JSON only, with no Markdown, preface, analysis, plan, code fence, or reas
 {{user_refine_prompt}}
 
 Output the complete revised manuscript as plain prose only. Do not include Markdown, a preface, an explanation, analysis, or screenplay formatting. Separate every paragraph with one blank line.`,
+  },
+  polish_chapter: {
+    systemRole: 'You are a demanding fiction line editor. Rewrite expression to remove template patterns, strengthen imagery and rhythm, and never change authorial facts, plot outcomes, character choices, or causality.',
+    content: `Polish the full chapter manuscript. Polishing improves prose and narrative craft only; it never changes facts, plot outcomes, character choices, or causality.
+
+[Story context]
+- Overall progress: {{global_summary}}
+- Recent chapter context: {{short_summary}}
+
+[Chapter brief]
+{{chapter_info}}
+
+[Hard prose rules]
+1. Banned patterns — rewrite any occurrence as concrete action, detail, or plain statement: "as if", "seemed to", "a trace of", "surged up in their heart", "heart tightened", "flickered in their eyes", "corner of the mouth curled", "the air seemed to freeze", "wheels of fate", "like a tide", "deep inside".
+2. Externalize emotion: delete direct labels such as "he felt angry/nervous/afraid" and "emotion rose in the heart" lines; convey emotion through physical reaction, action, and dialogue.
+3. No explanatory voice: after a stretch of description or dialogue, never step outside the scene to explain, summarize, or spell out significance ("this meant…", "it proved that…", "as if to say…", "as if reminding…", "undoubtedly…", "in a sense…"). Let readers infer motive and meaning from words and actions; never draw conclusions for them.
+4. Sentence rhythm: break up any three consecutive sentences of similar length; at most one parallel structure in a row; at most 6 contrastive connectors (but/however/yet) in the whole chapter.
+5. At most 2 progressive-aspect constructions per sentence; rewrite beyond that.
+6. Paragraph breathing: vary paragraph lengths; never keep every paragraph the same size.
+7. Dialogue: allow interruptions, colloquial texture, and incomplete sentences; dialogue must not deliver encyclopedia-style exposition.
+8. Ending: no summarizing, uplifting, or thesis-restating closers; end on action, dialogue, or scene.
+9. Punctuation: no stacked ellipses or dashes.
+
+[Anti-padding]
+Polishing improves expression, not length. Keep the chapter near {{word_number}} words; cut rambling action or lecture-style exposition, and never inflate without limit.
+
+[Contrast examples — absorb the standard, never copy the content]
+❌ A sense of dread surged up in his heart, as if the wheels of fate had begun to turn.
+✅ His grip on the knife stalled half a beat. The alley was too quiet — quiet enough to hear himself swallow.
+❌ "What are you trying to say?" She felt furious.
+✅ "Get to the point." She set the cup down; the porcelain cracked out a sharp note.
+❌ However, things were not that simple. However, a bigger crisis loomed behind.
+✅ Things were not that simple. Outside the door came a second set of footsteps.
+❌ That night was destined for the history books.
+✅ He blew out the lamp. Snow kept falling in the yard.
+
+[Project-wide writing guidance]
+{{global_guidance}}
+
+[Previous draft feedback — address it when present]
+{{polish_feedback}}
+
+[Source manuscript]
+{{draft_content}}
+
+[Writing style]
+{{writing_style}}`,
+    systemSuffix: `[Writing-style applicability]
+- Writing style selects expression only; it adds no facts or events, and not every item must be forced into the manuscript.
+- Explicit author facts and guidance, actual prior prose, the chapter's key causality, and its target length take priority. Do not use style guidance to rewrite them or add scenes, actions, or events merely to satisfy it.
+
+[Author polish guidance — highest priority when present]
+{{user_polish_prompt}}
+
+Output the complete polished manuscript as plain prose only. Do not include Markdown, a preface, an explanation, analysis, or screenplay formatting. Separate every paragraph with one blank line.`,
+  },
+  polish_spot_fix: {
+    systemRole: 'You are a precise fiction text repairer. Fix only the listed problems and leave every other word untouched.',
+    content: `Perform spot repairs on the chapter. Except for the text named in the fix list, keep the entire manuscript verbatim — no drive-by rewriting, optimizing, adding, or removing.
+
+[Fix list]
+{{problem_list}}
+
+[Author polish guidance — treat as a constraint when present]
+{{user_polish_prompt}}
+
+[Complete chapter manuscript]
+{{draft_content}}
+
+[Output contract]
+Output exactly one JSON object shaped like:
+{"patches":[{"find":"a passage that exists verbatim in the manuscript","replace":"the repaired text"}]}
+- find must copy consecutive manuscript text verbatim, including punctuation, be at least 6 characters long, and must be locatable in the manuscript.
+- replace rewrites only the problem portion and stays naturally connected to the surrounding text.
+- One patch per problem; omit any fix you are unsure about.
+- Output no explanation, no Markdown fence, and nothing outside the JSON.`,
+  },
+  polish_gate: {
+    systemRole: 'You are a strict fiction prose quality inspector. Judge prose craft and narrative technique only; never rewrite the manuscript, and never judge plot direction or setting.',
+    content: `Judge the quality of the following polished chapter.
+
+[Chapter brief]
+{{chapter_info}}
+
+[Target length]
+Near {{word_number}} words
+
+[Writing style]
+{{writing_style}}
+
+[Chapter under judgment]
+{{draft_content}}
+
+[Judgment dimensions]
+1. AI flavor: high-frequency AI wording ("as if", "seemed to", "a trace of", "surged up in the heart", "corner of the mouth curled"), template metaphors, told-not-shown emotion.
+2. Explanatory voice: stepping outside the scene after description or dialogue to explain, summarize, or spell out significance ("this meant…", "as if to say…"), drawing conclusions on the reader's behalf.
+3. Rhythm: varied paragraph lengths; no uniformly sized paragraphs; no progressive-aspect pileups inside sentences.
+4. Dialogue: natural and colloquial with subtext; no exposition lecturing.
+5. Hook and ending: does the ending pull the reader forward; no summarizing or uplifting closer.
+6. Completeness: obvious truncation, repeated paragraphs, or broken continuity.`,
+    systemSuffix: `[Author polish guidance — judgment reference when present]
+{{user_polish_prompt}}
+
+[JSON output contract]
+Output exactly one JSON object:
+{"verdict":"pass|full|spot","problems":[{"type":"ai-flavor|rhythm|dialogue|ending|completeness","scope":"global|local","quote":"verbatim source quote","suggestion":"one-line fix direction"}]}
+- verdict=pass: nothing needs attention.
+- verdict=full: a global problem exists (rhythm imbalance, structural damage, widespread AI flavor) requiring a full re-polish; problems describe the global issues, and quote may be omitted when scope=global.
+- verdict=spot: local problems exist; every problems entry carries a locatable verbatim quote, and quote is required when scope=local.
+- At most 8 problems; each suggestion within 40 characters.
+- Output no explanation, no Markdown fence, and nothing outside the JSON.`,
   },
   consistency_check: {
     systemRole: 'You are a rigorous fiction continuity editor. Review only objectively verifiable story facts and never grade subjective prose style. Use explicit categories and concrete textual evidence.',

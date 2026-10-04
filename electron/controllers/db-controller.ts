@@ -942,7 +942,7 @@ export function registerDatabaseController() {
   // ============================================================
   ipcMain.handle('db:revision-create', async (_event, params: {
     baseDraftId: number
-    revisionType: 'refine' | 'review-fix'
+    revisionType: 'refine' | 'review-fix' | 'polish'
     userPrompt?: string
     reviewSourceId?: number
     content: string
@@ -964,7 +964,7 @@ export function registerDatabaseController() {
 
   ipcMain.handle('db:revision-replace-pending', async (_event, params: {
     baseDraftId: number
-    revisionType: 'refine' | 'review-fix'
+    revisionType: 'refine' | 'review-fix' | 'polish'
     userPrompt?: string
     reviewSourceId?: number
     content: string

@@ -58,6 +58,9 @@ export const EDITABLE_PROMPT_KEYS: string[] = [
   'first_chapter_draft',
   'next_chapter_draft',
   'refine_chapter',
+  'polish_chapter',
+  'polish_spot_fix',
+  'polish_gate',
   'consistency_check',
   'analyze_writing_style',
   'refine_from_review',
@@ -109,6 +112,9 @@ export const PROMPT_VARIABLE_DESCRIPTIONS_EN: Readonly<Record<string, string>> =
   filtered_context: 'Knowledge-base search results',
   draft_content: 'Chapter draft',
   user_refine_prompt: 'Author revision guidance (optional)',
+  user_polish_prompt: 'Author polish guidance (optional)',
+  polish_feedback: 'Quality feedback on the previous polish round (optional)',
+  problem_list: 'Localized fix list for spot repair',
   chapter_content: 'Chapter content',
   review_focus: 'Review areas requested by the author (optional)',
   sample_text: 'Writing sample (3–5 chapters)',
@@ -908,6 +914,153 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 请直接输出精修后的全文章节内容。强制要求纯文本，禁止使用任何 Markdown 语法符号，严禁剧本式对话。【严禁】任何开场白或解释文字。
 **【强制排版要求】：段落与段落之间必须保留一个空行作为分隔，绝不允许不留空行的连续长段落。**`,
 
+  },
+
+  {
+    key: 'polish_chapter',
+    name: 'AI 润色（全篇）',
+    description: '文字与叙事工艺层面的整篇润色，不改事实与剧情',
+    systemRole: '你是一位严苛的小说文字编辑，以去模板化、增强画面感与节奏为目标重写表达，绝不改变作者事实、情节结论、人物选择与因果。',
+    variables: {
+      draft_content: '章节草稿内容',
+      chapter_info: '章节信息',
+      global_guidance: '写作要求',
+      global_summary: '近章要点（蓝图摘要）',
+      short_summary: '近章摘要',
+      word_number: '目标字数',
+      writing_style: '文风描述（可选）',
+      user_polish_prompt: '作者额外润色要求（可选）',
+      polish_feedback: '上一稿质量反馈（可选）',
+    },
+    content: `请对章节草稿进行【全篇润色】。润色只改进文字表达与叙事工艺，不改变事实、情节结论、人物选择与因果。
+
+【剧情上下文】
+- 全书目前进度摘要：{{global_summary}}
+- 近期章节回顾：{{short_summary}}
+
+【本章信息】
+{{chapter_info}}
+
+【文字层硬规约】
+1. 禁用词替换：原稿中出现的下列词与桥段必须改写为具体动作、细节或直白表达——仿佛、宛如、恍若、犹如、竟然、居然、一丝、一抹、涌上心头、心中一紧、心中一颤、眼底闪过、眼中闪过、嘴角勾起、勾起一抹、空气仿佛、命运的齿轮、潮水般、内心深处、不禁。
+2. 情绪外化：删除"他感到愤怒/紧张/害怕"类直陈与"心中涌起…"句式，用身体反应、动作和对话呈现情绪。
+3. 禁止解释腔：描写与对话之后严禁跳出叙述者身份解释、总结或点破意义（"这意味着…""这说明…""仿佛在诉说…""像是在提醒…""无疑…""从某种意义上…"）。人物动机与场景含义让读者从言行中自行推断，绝不替读者下结论。
+4. 句式节奏：连续三句长度相近时必须打破；排比最多连用一组；"但是/可是/然而/不过"全章合计不超过 6 处。
+5. 单句内"了"不超过 2 处，超限改写。
+6. 段落呼吸：段落长短错落，禁止通篇等长段落。
+7. 对话：允许打断、口语颗粒与不完整句；对话不得承担设定交代或百科说明。
+8. 结尾：禁止总结、升华、点题式收尾，用动作、对话或场景收束。
+9. 标点：省略号、破折号不得堆叠连用。
+
+【防注水】
+润色的本质是提升表达质量，不是拉长篇幅。目标字数 {{word_number}} 字左右；发现啰嗦的动作描写或说教式科普，果断删减，严禁无限扩写。
+
+【正反例对照（体会尺度，不要照抄）】
+❌ 他心中涌起一股不祥的预感，仿佛命运的齿轮开始转动。
+✅ 他握刀的手停了半拍。巷子太静了，静得能听见自己咽唾沫的声音。
+❌ "你到底想说什么？"她感到十分愤怒。
+✅ "说重点。"她把杯子放回桌上，瓷底磕出一声脆响。
+❌ 然而，事情并没有那么简单。然而，更大的危机还在后面。
+✅ 事情没那么简单。门外传来了第二个人的脚步声。
+❌ 这一夜，注定被载入史册。
+✅ 他吹熄了灯。院里的雪还在下。
+
+【全局写作要求】
+{{global_guidance}}
+
+【上一稿反馈（如有，必须针对性解决）】
+{{polish_feedback}}
+
+【待润色原稿】
+{{draft_content}}
+
+【文风要求（如有）】
+{{writing_style}}`,
+    systemSuffix: `【文风适用边界】
+- 文风仅用于选择表达方式，不是新增事实或事件要求；无需逐条强行兑现。
+- 作者明确事实与指导、实际前文、本章关键因果和本章篇幅优先。不得用文风改写这些内容或仅为兑现文风增加场景、动作或事件。
+
+★【作者额外润色要求（如有，最高优先级）】★
+{{user_polish_prompt}}
+
+请直接输出润色后的全文章节内容。强制要求纯文本，禁止使用任何 Markdown 语法符号，严禁剧本式对话。【严禁】任何开场白或解释文字。
+**【强制排版要求】：段落与段落之间必须保留一个空行作为分隔，绝不允许不留空行的连续长段落。**`,
+  },
+
+  {
+    key: 'polish_spot_fix',
+    name: 'AI 润色（定点修复）',
+    description: '只修复问题清单指出的句子，其余正文一字不动，输出 JSON 补丁',
+    systemRole: '你是一位精确的小说文字修复师。只修复清单指出的问题，其余正文一字不动。',
+    variables: {
+      draft_content: '章节全文',
+      problem_list: '待修复问题清单',
+      user_polish_prompt: '作者额外润色要求（可选）',
+    },
+    content: `请对章节中存在的问题做【定点修复】。除修复清单指出的文字外，其余内容必须原样保留，禁止顺带改写、优化或增删任何其他文字。
+
+【修复清单】
+{{problem_list}}
+
+【作者额外润色要求（约束，如有）】
+{{user_polish_prompt}}
+
+【完整章节原文】
+{{draft_content}}
+
+【输出合同】
+只输出一个 JSON 对象，形如：
+{"patches":[{"find":"原文中逐字存在的一段文字","replace":"修复后的文字"}]}
+- find 必须逐字复制原文中的连续文字（含标点），长度不少于 6 个字符，保证在原文中能被找到。
+- replace 只改写问题部分，并保持与前后文字自然衔接。
+- 每个问题一个补丁；没有把握的修复不要输出。
+- 禁止输出解释、Markdown 代码块或 JSON 以外的任何内容。`,
+  },
+
+  {
+    key: 'polish_gate',
+    name: 'AI 润色（质量门控）',
+    description: '判定润色稿质量并输出 JSON 结论：通过、整篇重润或定点修复',
+    systemRole: '你是一位严格的小说文字质检编辑。只评判文字与叙事工艺，不改写正文，不评判剧情走向与设定。',
+    variables: {
+      draft_content: '待判定章节全文',
+      chapter_info: '章节信息',
+      word_number: '目标字数',
+      writing_style: '文风描述（可选）',
+      user_polish_prompt: '作者额外润色要求（可选）',
+    },
+    content: `请对以下润色后的章节做质量判定。
+
+【章节信息】
+{{chapter_info}}
+
+【目标字数】
+{{word_number}} 字左右
+
+【文风要求（如有）】
+{{writing_style}}
+
+【待判定章节全文】
+{{draft_content}}
+
+【评判维度】
+1. AI 痕迹：高频 AI 用词（仿佛/宛如/一丝/涌上心头/嘴角勾起等）、模板化比喻、情绪直陈而非外化。
+2. 解释腔：是否在描写或对话之后跳出解释、总结或点破意义（"这意味着…""仿佛在诉说…"），替代读者下结论。
+3. 节奏：段落长短是否有呼吸感；是否存在通篇等长段落；单句"了"是否堆砌。
+4. 对话：是否口语自然、有潜台词；是否存在设定交代腔。
+5. 钩子与结尾：结尾是否有追读动力；是否总结升华式收尾。
+6. 完整性：是否存在明显残缺、重复段落或断裂衔接。`,
+    systemSuffix: `★【作者额外润色要求（判定参照，如有）】★
+{{user_polish_prompt}}
+
+【JSON 输出合同】
+只输出一个 JSON 对象：
+{"verdict":"pass|full|spot","problems":[{"type":"ai-flavor|rhythm|dialogue|ending|completeness","scope":"global|local","quote":"原文引句","suggestion":"一句话修改方向"}]}
+- verdict=pass：无需要处理的问题。
+- verdict=full：存在全局性问题（节奏失衡、结构残缺、大面积 AI 痕迹），需要整篇重新润色；problems 说明全局问题，scope=global 时 quote 可省略。
+- verdict=spot：存在局部问题；problems 每条给出可定位的原文引句，scope=local 时 quote 必填且逐字取自原文。
+- problems 最多 8 条，每条 suggestion 不超过 40 字。
+- 禁止输出解释、Markdown 代码块或 JSON 以外的任何内容。`,
   },
 
   // ================================================================
