@@ -31,6 +31,20 @@
   <img src="docs/assets/readme/hero-en-v2.png" alt="AI Novel Writer — a local-first desktop workspace for long-form fiction" width="100%" />
 </p>
 
+## About this fork
+
+This repository is a personal fork of the upstream project and evolves independently: upstream improvements are synced in when appropriate, while the enhancements listed below have mostly not been merged upstream (some are waiting on pull requests). The fork therefore diverges from upstream most of the time — treat this section as the source of truth for feature differences. In-app updates still point at the upstream repository; releases on this fork provide installer downloads only and are not an update feed.
+
+## Enhancements over upstream
+
+- **Fully automatic multi-round AI polish**: one click runs full-chapter polish → dual quality gates (deterministic prose scanning + AI craft judgment) → gate-driven full re-polish or spot fixes, up to three fully automatic rounds with no manual confirmation. Gate findings (AI flavor, explanatory voice, rhythm, dialogue, completeness) are logged with verbatim quotes, and only the winning draft lands through the merge view.
+- **Merge view enhancements**: character-level inline diff highlighting, change-point navigation (‹ › buttons, `Alt+↑`/`Alt+↓`, `F3`/`Shift+F3`, `Enter` to accept the current change), auto-folding of long unchanged regions, and full-file change summaries; version compare and polish compare share the same view.
+- **Batch creation resilience**: transient provider errors (rate limits, timeouts, 5xx) during batch chapter creation retry with backoff instead of dropping the batch; cancellation during retries is recognized correctly.
+- **Finalized-chapter protection**: new blank drafts are hard-blocked inside the write transaction for finalized chapters.
+- **Fork-oriented release flow**: a dedicated quick Windows packaging workflow; installers and tags are pinned to the same commit, and releases ship full Chinese release notes.
+
+Per-version details live in [.release/notes/](.release/notes/).
+
 > ## v1.1.0
 >
 > - **Source-grounded continuity material** — Author-provided character information, model-derived progress, and legacy data with unknown provenance are no longer presented as the same kind of fact; later writing prefers finalized source prose with an identifiable origin.
