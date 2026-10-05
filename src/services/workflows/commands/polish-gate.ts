@@ -128,12 +128,22 @@ export function decidePolishGate(input: PolishGateInput): PolishGateDecision {
     llm.verdict = 'spot'
     notes.push(input.locale === 'en-US'
       ? 'Full re-polish is unavailable after round 2; downgraded to spot-fix.'
-      : '第二轮起不再允许全篇重润，已降级为局部修正。')
+      : '第二轮起不再允许全篇重润，已降级为定点修复。')
   }
 
   const deterministicIssues = summarizeProseIssues(deterministic, input.locale)
   const llmLocalProblems = llm.problems.filter(problem => problem.scope === 'local')
   const hasLocalIssues = deterministicIssues.length > 0 || llmLocalProblems.length > 0
+  const localizedProblemType = (type: string) => {
+    const labels: Record<string, { zhCN: string; enUS: string }> = {
+      'ai-flavor': { zhCN: 'AI 痕迹', enUS: 'AI flavor' },
+      rhythm: { zhCN: '节奏', enUS: 'rhythm' },
+      dialogue: { zhCN: '对话', enUS: 'dialogue' },
+      ending: { zhCN: '结尾', enUS: 'ending' },
+      completeness: { zhCN: '完整性', enUS: 'completeness' },
+    }
+    return labels[type] ? (input.locale === 'en-US' ? labels[type]!.enUS : labels[type]!.zhCN) : type
+  }
 
   let action: PolishGateAction
   if (effectiveVerdict === 'full' && input.round === 1) {
@@ -151,13 +161,17 @@ export function decidePolishGate(input: PolishGateInput): PolishGateDecision {
 
   const problems: string[] = [...deterministicIssues]
   for (const problem of llmLocalProblems) {
-    const suggestion = problem.suggestion ? `（${problem.suggestion}）` : ''
-    problems.push(`- [${problem.type}] "${problem.quote}"${suggestion}`)
+    const suggestion = problem.suggestion
+      ? (input.locale === 'en-US' ? ` (${problem.suggestion})` : `（${problem.suggestion}）`)
+      : ''
+    problems.push(`- 〔${localizedProblemType(problem.type)}〕"${problem.quote}"${suggestion}`)
   }
   if (action === 'full-repolish') {
     for (const problem of llm.problems.filter(p => p.scope === 'global')) {
-      const suggestion = problem.suggestion ? `（${problem.suggestion}）` : ''
-      problems.push(`- [${problem.type}/global] ${suggestion || problem.type}`)
+      const suggestion = problem.suggestion
+        ? (input.locale === 'en-US' ? ` (${problem.suggestion})` : `（${problem.suggestion}）`)
+        : ''
+      problems.push(`- 〔${localizedProblemType(problem.type)}·全局〕${suggestion || localizedProblemType(problem.type)}`)
     }
   }
 
