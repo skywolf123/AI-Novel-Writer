@@ -95,7 +95,7 @@ export function injectWritingSkillIntoSession(
   }
 }
 
-export type WorkflowGenerationIntent = 'structured' | 'text' | 'character-architecture'
+export type WorkflowGenerationIntent = 'structured' | 'text' | 'character-architecture' | 'polish'
 
 /**
  * Intent cost ceilings are product policy, never model profiles. The runtime
@@ -129,6 +129,18 @@ export const WORKFLOW_GENERATION_BUDGETS = Object.freeze({
     maxRequestedOutputTokensPerAttempt:
       GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
     deadlineMs: 20 * 60_000,
+  }),
+  polish: Object.freeze({
+    // Worst path: full polish + gate + (full re-polish | spot-fix) + gate +
+    // final spot-fix. Every call reserves the model's full output ceiling
+    // (32,768), so five calls can demand 163,840; the absolute cap 147,456
+    // still leaves a shrunken-but-usable reservation for the small final
+    // patch output.
+    maxAttempts: 12,
+    maxRequestedOutputTokens: GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokens,
+    maxRequestedOutputTokensPerAttempt:
+      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
+    deadlineMs: 40 * 60_000,
   }),
 })
 
