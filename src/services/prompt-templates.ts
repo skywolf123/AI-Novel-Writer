@@ -62,6 +62,9 @@ export const EDITABLE_PROMPT_KEYS: string[] = [
   'polish_spot_fix',
   'polish_gate',
   'consistency_check',
+  'consistency_check_continuity',
+  'consistency_check_logic',
+  'consistency_check_narration',
   'analyze_writing_style',
   'refine_from_review',
   'generate_chapter_notes',
@@ -1121,6 +1124,148 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 
 severity 取值：error=严重矛盾强烈建议修复, warning=轻微不一致酌情修复, pass=该维度通过无问题。
 全部 items 必须为 1–10 条；不要求每个检查维度单列一项，不得为覆盖类别而凑 pass 项，同一问题不得重复。每项 quote 不超过 160 字，description 不超过 200 字；summary 不超过 120 字。quote 字段在 pass 时可省略。`,
+  },
+
+  // ================================================================
+  // 审稿分片：一次审稿拆成多个并行 LLM 调用，每个分片只审少数维度、
+  // 只输出少量 JSON，降低单次输出截断与注意力稀释。
+  // ================================================================
+
+  {
+    key: 'consistency_check_continuity',
+    name: '一致性审稿（事实线分片）',
+    description: '检查本章与前文事实线的连贯性、章节串联与伏笔完整性',
+    systemRole: '你是一位严谨的小说审稿编辑。只依据文本证据检查本章与前文事实线的连续性，区分客观问题和主观偏好。',
+    variables: {
+      chapter_content: '章节内容',
+      global_summary: '已定稿前文事实',
+      future_blueprints: '当前及未来蓝图/计划',
+      review_focus: '作者要求重点检查的维度（可选）',
+    },
+    content: `请对以下章节进行事实线审查。
+
+【待审章节】
+{{chapter_content}}
+
+【已定稿前文事实】
+{{global_summary}}
+
+【当前及未来蓝图/计划（非既定历史）】
+{{future_blueprints}}
+
+【审查原则】
+
+1. 举证审查：只报告有明确文本证据的问题。每个问题必须引用原文具体句子。
+2. 宁缺毋滥：没有问题的维度可以省略；如需明确已检查，可输出一条 severity 为 pass 的记录。不要凑数量。
+3. 只查一致性不评文笔：不报告风格偏好、文笔建议、创作建议。只报告可验证的事实矛盾。
+4. 客观可验证：报出的每个问题必须能被第三方编辑复查确认。
+
+【检查维度】
+
+1. 剧情连贯性：本章情节是否与前文（已定稿事实）有矛盾？前后文是否自相矛盾？
+2. 前后章节串联：伏笔、悬念是否连贯？是否出现未交代前因的突兀情节？
+3. 伏笔完整性：本章是否存在应回收而未提及的前置伏笔？是否有与已知伏笔体系冲突的新增设置？
+
+`,
+    systemSuffix: `★【作者要求重点检查的维度（如有，这些维度必须优先、深入检查）】★：
+{{review_focus}}
+
+## 输出格式（JSON）
+
+请严格输出以下 JSON 格式：
+
+{"items":[{"category":"剧情连贯性","severity":"pass","description":"未发现与前文矛盾"},{"category":"伏笔完整性","severity":"error","quote":"原文中的具体句子","description":"问题描述"}]}
+
+severity 取值：error=严重矛盾强烈建议修复, warning=轻微不一致酌情修复, pass=该维度通过无问题。
+根字段只允许 items；不得输出 summary、goalReviews 或任何其他字段。
+全部 items 必须为 1–10 条；不要求每个检查维度单列一项，不得为覆盖类别而凑 pass 项，同一问题不得重复。每项 quote 不超过 160 字，description 不超过 200 字。quote 字段在 pass 时可省略。禁止输出 Markdown、解释或思考过程。`,
+  },
+
+  {
+    key: 'consistency_check_logic',
+    name: '一致性审稿（因果与角色分片）',
+    description: '检查章节的因果逻辑、动机合理性与角色状态一致性',
+    systemRole: '你是一位严谨的小说审稿编辑。只依据文本证据检查因果逻辑、动机与角色状态，区分客观问题和主观偏好。',
+    variables: {
+      chapter_content: '章节内容',
+      character_states: '角色状态',
+      world_building: '世界观设定',
+      review_focus: '作者要求重点检查的维度（可选）',
+    },
+    content: `请对以下章节进行因果与角色审查。
+
+【待审章节】
+{{chapter_content}}
+
+【角色状态】
+{{character_states}}
+
+【世界观设定】
+{{world_building}}
+
+【审查原则】
+
+1. 举证审查：只报告有明确文本证据的问题。每个问题必须引用原文具体句子。
+2. 宁缺毋滥：没有问题的维度可以省略；如需明确已检查，可输出一条 severity 为 pass 的记录。不要凑数量。
+3. 只查一致性不评文笔：不报告风格偏好、文笔建议、创作建议。只报告可验证的事实矛盾。
+4. 客观可验证：报出的每个问题必须能被第三方编辑复查确认。
+
+【检查维度】
+
+1. 剧情合理性：因果逻辑是否成立？人物动机是否合理？是否有常识性硬伤？
+2. 角色状态：角色行为、能力、位置、情感是否与角色状态档案一致？
+
+`,
+    systemSuffix: `★【作者要求重点检查的维度（如有，这些维度必须优先、深入检查）】★：
+{{review_focus}}
+
+## 输出格式（JSON）
+
+请严格输出以下 JSON 格式：
+
+{"items":[{"category":"剧情合理性","severity":"pass","description":"未发现因果或动机问题"},{"category":"角色状态","severity":"warning","quote":"原文中的具体句子","description":"轻微不一致说明"}]}
+
+severity 取值：error=严重矛盾强烈建议修复, warning=轻微不一致酌情修复, pass=该维度通过无问题。
+根字段只允许 items；不得输出 summary、goalReviews 或任何其他字段。
+全部 items 必须为 1–10 条；不要求每个检查维度单列一项，不得为覆盖类别而凑 pass 项，同一问题不得重复。每项 quote 不超过 160 字，description 不超过 200 字。quote 字段在 pass 时可省略。禁止输出 Markdown、解释或思考过程。`,
+  },
+
+  {
+    key: 'consistency_check_narration',
+    name: '一致性审稿（叙事规范分片）',
+    description: '检查叙事人称、视角与叙述时态的规范一致性',
+    systemRole: '你是一位严谨的小说审稿编辑。只依据文本证据检查叙事人称与视角的规范一致性，区分客观问题和主观偏好。',
+    variables: {
+      chapter_content: '章节内容',
+    },
+    content: `请对以下章节进行叙事规范审查。
+
+【待审章节】
+{{chapter_content}}
+
+【审查原则】
+
+1. 举证审查：只报告有明确文本证据的问题。每个问题必须引用原文具体句子。
+2. 宁缺毋滥：没有问题的维度可以省略；如需明确已检查，可输出一条 severity 为 pass 的记录。不要凑数量。
+3. 只查规范不评文笔：不报告风格偏好、文笔建议、创作建议。只报告可机械验证的叙事规范违规。
+4. 客观可验证：报出的每个问题必须能被第三方编辑复查确认。
+
+【检查维度】
+
+1. 人称一致性：先判断全章主导叙事人称（第一或第三人称），再检查是否混入另一种人称的叙述句。人物对话、直接引语和有明确标记的内心独白不算漂移。
+2. 视角越权：叙述信息不得超出当前视角人物的感知范围（全知视角除外）；不得在同一场景内无切换标记地变换视角人物。
+3. 时态滑动：叙述时态不得在无修辞意图的情况下切换。
+
+`,
+    systemSuffix: `## 输出格式（JSON）
+
+请严格输出以下 JSON 格式：
+
+{"items":[{"category":"人称一致性","severity":"error","quote":"原文中的具体句子","description":"第三人称叙述中混入第一人称句子"}]}
+
+severity 取值：error=严重违规强烈建议修复, warning=轻微不一致酌情修复, pass=该维度通过无问题。
+根字段只允许 items；不得输出 summary、goalReviews 或任何其他字段。
+全部 items 必须为 1–10 条；不要求每个检查维度单列一项，不得为覆盖类别而凑 pass 项，同一问题不得重复。每项 quote 不超过 160 字，description 不超过 200 字。quote 字段在 pass 时可省略。禁止输出 Markdown、解释或思考过程。`,
   },
 
   // ================================================================

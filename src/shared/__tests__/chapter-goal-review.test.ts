@@ -58,7 +58,7 @@ describe('本章目标审稿合同', () => {
 
   it('提示强调到期动作、原意和同一请求，不要求未来行动提前兑现', () => {
     const prompt = buildChapterGoalReviewPrompt(goals, 'zh-CN')
-    expect(prompt).toContain('同一 JSON 根对象')
+    expect(prompt).toContain('根字段仅 goalReviews 数组')
     expect(prompt).toContain('部分完成不等于整项目标完成')
     expect(prompt).toContain('仅当目标要求达成约定时，本章达成约定即可，不要求提前执行')
     expect(prompt).toContain('先按原意区分当章行动与背景/未来约束')

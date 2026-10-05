@@ -214,6 +214,12 @@ export class ReviewPromptBuilder extends BasePromptBuilder {
     this.variables.review_focus = focus;
     return this;
   }
+
+  /** 事实线分片：当前及未来蓝图/计划（非既定历史） */
+  withFutureBlueprints(futureBlueprints: string) {
+    this.variables.future_blueprints = futureBlueprints;
+    return this;
+  }
 }
 
 /**

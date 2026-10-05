@@ -13,6 +13,7 @@ import {
   workflowWritingLanguage,
 } from '../workflow-project-session'
 import { assertMateriallyCompleteRevision } from './refinement-completeness'
+import { assertNoExactDuplicateParagraphs } from '../../../shared/duplicate-spans'
 import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 import {
@@ -271,6 +272,7 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
       novelConfig.wordsPerChapter,
       workflowUiLocale(context),
     )
+    assertNoExactDuplicateParagraphs(cleanRefined, workflowUiLocale(context))
 
     if (!sameProjectSessionContext(
       projectSession,

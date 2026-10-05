@@ -23,6 +23,7 @@ import type { ChapterInfo } from '../chapter-workflow'
 import { normalizeChapterWordsTarget } from '../chapter-creation-parameters'
 import { appendVisibleTextContinuation } from '../bounded-completion'
 import { stripThinkingTags } from '../workflow-utils'
+import { assertNoExactDuplicateParagraphs } from '../../../shared/duplicate-spans'
 import {
   createGenerationRuntime,
   type CreateGenerationRuntimeOptions,
@@ -773,6 +774,7 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
           'The new chapter substantially replays the previous ending, so it was not saved. Regenerate it and continue after the events already completed in the previous chapter.',
         ))
       }
+      assertNoExactDuplicateParagraphs(cleanDraftText, context.uiLocale ?? 'zh-CN')
 
       // 落于数据库
       if (!sameProjectSessionContext(

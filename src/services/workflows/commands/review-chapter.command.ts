@@ -23,6 +23,17 @@ import type { FrozenDraftSourceIdentity } from '../chapter-workflow'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 import { CHARACTER_STATE_TEXT_FIELDS } from '../../../shared/character-roster'
 import { buildChapterGoalReviewPrompt, chapterGoalReviewItems, freezeChapterGoals, normalizeChapterGoalReview } from '../../../shared/chapter-goal-review'
+import { detectDuplicateParagraphs, mergeDuplicateSpansIntoReview } from '../../../shared/duplicate-spans'
+import {
+  dedupeReviewItems,
+  MERGED_REVIEW_ITEMS_LIMIT,
+  parseShardReviewItems,
+  routeReviewShards,
+  shardReviewFocus,
+  synthesizeReviewSummary,
+  type ReviewShardKey,
+  type ShardReviewItem,
+} from '../../../shared/review-shards'
 
 
 export interface ReviewChapterParams {
@@ -48,89 +59,17 @@ export interface ReviewChapterParams {
   }
 }
 
-const REVIEW_SUMMARY_MAX_CHARACTERS = 120
-const REVIEW_DESCRIPTION_MAX_CHARACTERS = 200
-const REVIEW_QUOTE_MAX_CHARACTERS = 160
-
-interface ReviewResultItem extends Record<string, unknown> {
-  category: string
-  severity: 'error' | 'warning' | 'pass'
-  description: string
-  quote?: string
-}
-
-interface ReviewResult extends Record<string, unknown> {
-  summary: string
-  items: ReviewResultItem[]
-  goalReviews?: unknown
-}
-
-function isBoundedText(value: unknown, maxCharacters: number): value is string {
-  return typeof value === 'string'
-    && Boolean(value.trim())
-    && Array.from(value.trim()).length <= maxCharacters
-}
-
-function boundText(value: string, maxCharacters: number): string {
-  return Array.from(value.trim()).slice(0, maxCharacters).join('')
-}
-
-function isReviewShape(value: unknown): value is ReviewResult {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const review = value as Record<string, unknown>
-  if (Object.keys(review).some(key => key !== 'summary' && key !== 'items' && key !== 'goalReviews')
-    || typeof review.summary !== 'string'
-    || !Array.isArray(review.items)
-    || review.items.length < 1
-    || review.items.length > 10) return false
-  return review.items.every((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return false
-    const record = item as Record<string, unknown>
-    const severity = record.severity
-    return !Object.keys(record).some(key => (
-      key !== 'category'
-      && key !== 'severity'
-      && key !== 'description'
-      && key !== 'quote'
-    ))
-      && typeof record.category === 'string'
-      && (severity === 'error' || severity === 'warning' || severity === 'pass')
-      && typeof record.description === 'string'
-      && (record.quote === undefined
-        ? severity === 'pass'
-        : typeof record.quote === 'string')
-  })
-}
-
-function isReviewResult(value: unknown): value is ReviewResult {
-  return isReviewShape(value)
-    && isBoundedText(value.summary, REVIEW_SUMMARY_MAX_CHARACTERS)
-    && value.items.every(item => (
-      Boolean(item.category.trim())
-      && isBoundedText(item.description, REVIEW_DESCRIPTION_MAX_CHARACTERS)
-      && (item.quote === undefined || isBoundedText(item.quote, REVIEW_QUOTE_MAX_CHARACTERS))
-    ))
-}
-
-function parseReviewResult(content: string): ReviewResult {
+/** 解析本章目标分片输出：根字段仅 goalReviews 数组 */
+function parseGoalShardResult(content: string): unknown[] {
   const trimmed = content.trim()
   const fenced = /^```json[ \t]*\r?\n([\s\S]*?)\r?\n```$/iu.exec(trimmed)
   const parsed: unknown = JSON.parse(fenced?.[1]?.trim() ?? trimmed)
-  if (!isReviewShape(parsed)) throw new Error('invalid review contract')
-  const bounded: ReviewResult = {
-    ...(parsed.goalReviews === undefined ? {} : { goalReviews: parsed.goalReviews }),
-    summary: boundText(parsed.summary, REVIEW_SUMMARY_MAX_CHARACTERS),
-    items: parsed.items.map(item => ({
-      category: item.category,
-      severity: item.severity,
-      description: boundText(item.description, REVIEW_DESCRIPTION_MAX_CHARACTERS),
-      ...(item.quote === undefined
-        ? {}
-        : { quote: boundText(item.quote, REVIEW_QUOTE_MAX_CHARACTERS) }),
-    })),
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid goal review contract')
+  const root = parsed as Record<string, unknown>
+  if (Object.keys(root).some(key => key !== 'goalReviews') || !Array.isArray(root.goalReviews)) {
+    throw new Error('invalid goal review contract')
   }
-  if (!isReviewResult(bounded)) throw new Error('invalid review contract')
-  return bounded
+  return root.goalReviews
 }
 
 function formatFinalizedHistory(
@@ -278,112 +217,209 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       )
     }
 
-    const template = await resolvePromptTemplate('consistency_check', projectSession, writingLanguage)
-    if (!template) throw new Error(text('未找到审稿模板', 'The review prompt template was not found.'))
+    // ---- 审稿分片：A 事实线 / B 因果与角色 / C 叙事规范 / D 本章目标 ----
+    // 每个分片独立调用、独立重建，只输出少量 JSON，降低截断与注意力稀释。
+    const routing = routeReviewShards(this.params.reviewFocus)
+    const [continuityTemplate, logicTemplate, narrationTemplate] = await Promise.all([
+      resolvePromptTemplate('consistency_check_continuity', projectSession, writingLanguage),
+      resolvePromptTemplate('consistency_check_logic', projectSession, writingLanguage),
+      resolvePromptTemplate('consistency_check_narration', projectSession, writingLanguage),
+    ])
+    if (!continuityTemplate || !logicTemplate || !narrationTemplate) {
+      throw new Error(text('未找到审稿分片模板', 'A review shard prompt template was not found.'))
+    }
 
-    const promptBuilder = new ReviewPromptBuilder(template, writingLanguage)
-      .withChapterContent(draft)
-      .withCharacterStates(characterState)
-      .withGlobalSummary(contextSummary)
-      .withWorldBuilding(worldBuilding)
-      .withReviewFocus(this.params.reviewFocus || '')
-    const reviewPrompt = [
-      promptBuilder.build(),
-      authorGuidanceSection,
-      authorConfigSection,
-      planningMaterial,
-      buildChapterGoalReviewPrompt(frozenGoals, writingLanguage),
-    ].join('\n\n')
-
-    callbacks.log(text('调用 AI 审查员对本章进行多维度扫描...', 'Running the AI continuity review...'))
-
-    // 期望 JSON 格式返回；bounded 模式会在 length 时自动重建一次。
-    // 部分模型/网关在输出上限截断时会把 finishReason 报成 stop，导致
-    // 坏 JSON 直接进入解析 → 这里在合同校验失败时再补一次完整替代输出。
-    let reviewResultRaw = await this.callLLMWithBoundedCompletion(
-      reviewPrompt,
-      promptBuilder.getSystemRole(),
-      callbacks,
-      { mode: 'replace-structured-output', maxContinuations: 1 },
-      {
-        responseFormat: { type: 'json_object' },
-        purpose: 'review-chapter',
-        reasoningStage: 'review',
-        writingSkillStage: 'review',
-      },
-      context,
+    const itemsOnlyContract = promptLanguageText(
+      writingLanguage,
+      '【硬性要求】只重新输出一个完整审稿 JSON，根字段仅 items：items 为 1–10 条，每条含 category、severity(error|warning|pass)、description(≤200 字符)；quote 仅 pass 可省略，error/warning 必须提供且不超过 160 字符。不得输出 summary、goalReviews、约定以外的字段、Markdown、解释或思考过程。',
+      '[Hard requirement] Output one complete review JSON whose root field is only items: 1–10 entries with category, severity(error|warning|pass), description(≤200 characters); quote is optional only for pass and required (≤160 characters) for error/warning. Never output summary, goalReviews, fields outside this contract, Markdown, explanation, or reasoning.',
     )
-    this.assertNotCancelled(context)
+    const goalsOnlyContract = promptLanguageText(
+      writingLanguage,
+      '【硬性要求】只重新输出一个完整 JSON，根字段仅 goalReviews 数组：逐项覆盖冻结清单，每项含 id、status(completed|unmet|unknown)、description、evidence；completed/unmet 必须给出正文逐字 quote，unknown 可 evidence:[]。不得输出 items、summary 或其他字段。',
+      '[Hard requirement] Output one complete JSON whose root field is only the goalReviews array covering the frozen checklist: each entry with id, status(completed|unmet|unknown), description, evidence; completed/unmet require verbatim draft quotes, unknown may use evidence:[]. Never output items, summary, or other fields.',
+    )
 
-    const parseAttempt = (): ReviewLike => parseReviewResult(this.stripThinkingTags(reviewResultRaw))
+    interface ShardCall<T> {
+      key: string
+      logName: string
+      prompt: string
+      systemRole: string
+      parse: (raw: string) => T
+      rebuildContract: string
+    }
 
-    let parsedResult: ReviewLike
-    try {
-      parsedResult = parseAttempt()
-    } catch (parseError) {
-      const detail = parseError instanceof SyntaxError
-        ? text(
-          '输出不是完整 JSON（可能被模型输出上限截断）',
-          'the output is not complete JSON (it may be truncated by the model output limit)',
-        )
-        : text(
-          '输出不符合审稿报告合同（字段缺失、越界或多余）',
-          'the output does not match the review-report contract (missing, oversized, or extra fields)',
-        )
+    const runLlmShard = async <T>(shard: ShardCall<T>): Promise<T> => {
       callbacks.log(text(
-        `审稿结果未通过校验（${detail}），正在请求一次完整替代输出...`,
-        `The review result failed validation (${detail}); requesting one complete replacement...`,
+        `  审稿分片[${shard.logName}]已发起`,
+        `  Review shard [${shard.logName}] started`,
       ))
-      this.assertNotCancelled(context)
-      const rebuildInstruction = promptLanguageText(
-        writingLanguage,
-        '上一轮审稿输出未通过合同校验，已被丢弃，不得引用或续接。请重新完成原始审稿任务。',
-        'The previous review output failed contract validation and was discarded. Do not quote or continue it; complete the original review task again.',
-      )
-      const rebuildHeading = promptLanguageText(writingLanguage, '【原始审稿任务】', '[Original review task]')
-      const rebuildContract = promptLanguageText(
-        writingLanguage,
-        '【硬性要求】只重新输出一个完整审稿 JSON，根字段为 summary、items、goalReviews：summary 不超过 120 字符；items 为 1–10 条，每条含 category、severity(error|warning|pass)、description(≤200 字符)；quote 仅 pass 可省略，error/warning 必须提供且不超过 160 字符。goalReviews 按上方最初冻结清单逐项返回 id、status、description、evidence，不受 items 条数限制；只用原始待审正文核对。不得输出这些约定以外的字段、Markdown、解释或思考过程。',
-        '[Hard requirement] Output one complete review JSON with root fields summary, items and goalReviews: summary within 120 characters; items 1–10 entries with category, severity(error|warning|pass), description(≤200 characters); quote is optional only for pass and required (≤160 characters) for error/warning. goalReviews must cover the original frozen checklist above with id, status, description and evidence, without the general items count limit; use only the original draft for evidence. No fields outside these contracts, Markdown, explanation, or reasoning.',
-      )
-      reviewResultRaw = await this.callLLMWithBoundedCompletion(
-        [rebuildInstruction, rebuildHeading, reviewPrompt, rebuildContract].join('\n\n'),
-        promptBuilder.getSystemRole(),
+      let raw = await this.callLLMWithBoundedCompletion(
+        shard.prompt,
+        shard.systemRole,
         callbacks,
         { mode: 'replace-structured-output', maxContinuations: 1 },
         {
           responseFormat: { type: 'json_object' },
-          purpose: 'review-chapter-rebuild',
+          purpose: `review-chapter-${shard.key}`,
           reasoningStage: 'review',
           writingSkillStage: 'review',
         },
         context,
       )
-      this.assertNotCancelled(context)
       try {
-        parsedResult = parseAttempt()
-      } catch (rebuildError) {
-        const rebuildDetail = rebuildError instanceof SyntaxError
-          ? text(
-            '替代输出仍不是完整 JSON',
-            'the replacement output is still not complete JSON',
-          )
-          : text(
-            '替代输出仍不符合审稿报告合同',
-            'the replacement output still does not match the review-report contract',
-          )
-        throw new Error(text(
-          `AI 返回的审稿结果两次均无效（${rebuildDetail}），因此未保存报告。`
-            + '若此问题反复出现，通常是审稿输出被模型最大长度截断：请提高模型的最大输出 Tokens 后重试。',
-          `The AI review response was invalid twice (${rebuildDetail}), so no report was saved. `
-            + 'If this keeps happening, the review output is usually truncated by the model maximum length: increase the model maximum output tokens and retry.',
+        return shard.parse(this.stripThinkingTags(raw))
+      } catch {
+        // 分片内合同失败再补一次完整替代输出：失败隔离在分片内，不串片。
+        this.assertNotCancelled(context)
+        callbacks.log(text(
+          `  分片[${shard.logName}]输出未通过合同校验，正在请求一次完整替代输出...`,
+          `  Shard [${shard.logName}] failed contract validation; requesting one complete replacement...`,
         ))
+        const rebuildPrompt = [
+          promptLanguageText(
+            writingLanguage,
+            '上一轮分片输出未通过合同校验，已被丢弃，不得引用或续接。请重新完成原始审稿任务。',
+            'The previous shard output failed contract validation and was discarded. Do not quote or continue it; complete the original review task again.',
+          ),
+          promptLanguageText(writingLanguage, '【原始审稿任务】', '[Original review task]'),
+          shard.prompt,
+          shard.rebuildContract,
+        ].join('\n\n')
+        raw = await this.callLLMWithBoundedCompletion(
+          rebuildPrompt,
+          shard.systemRole,
+          callbacks,
+          { mode: 'replace-structured-output', maxContinuations: 1 },
+          {
+            responseFormat: { type: 'json_object' },
+            purpose: `review-chapter-${shard.key}-rebuild`,
+            reasoningStage: 'review',
+            writingSkillStage: 'review',
+          },
+          context,
+        )
+        try {
+          return shard.parse(this.stripThinkingTags(raw))
+        } catch {
+          throw new Error(text(
+            `分片[${shard.logName}]两次输出均未通过审稿合同校验，报告未保存。若反复出现，通常是输出被模型最大长度截断：请提高模型最大输出 Tokens 后重试。`,
+            `Shard [${shard.logName}] failed the review contract validation twice, so no report was saved. If this keeps happening, the output was likely truncated by the model maximum length: increase the model maximum output tokens and retry.`,
+          ))
+        }
       }
     }
-    this.assertNotCancelled(context)
 
-    const goalReview = normalizeChapterGoalReview(parsedResult.goalReviews, frozenGoals, draft, writingLanguage)
-    delete parsedResult.goalReviews
+    interface ShardOutcome {
+      key: ReviewShardKey | 'goals'
+      items?: ShardReviewItem[]
+      goalReviews?: unknown[]
+    }
+
+    const authorSections = [authorGuidanceSection, authorConfigSection]
+    const shardPromises: Array<Promise<ShardOutcome>> = []
+
+    if (routing.continuity) {
+      const builder = new ReviewPromptBuilder(continuityTemplate, writingLanguage)
+        .withChapterContent(draft)
+        .withGlobalSummary(contextSummary)
+        .withFutureBlueprints(planningMaterial)
+        .withReviewFocus(shardReviewFocus(this.params.reviewFocus, 'continuity'))
+      shardPromises.push(
+        runLlmShard({
+          key: 'continuity',
+          logName: promptLanguageText(writingLanguage, '事实线', 'continuity'),
+          prompt: [builder.build(), ...authorSections].join('\n\n'),
+          systemRole: builder.getSystemRole(),
+          parse: parseShardReviewItems,
+          rebuildContract: itemsOnlyContract,
+        }).then(items => ({ key: 'continuity' as const, items })),
+      )
+    }
+
+    if (routing.logic) {
+      const builder = new ReviewPromptBuilder(logicTemplate, writingLanguage)
+        .withChapterContent(draft)
+        .withCharacterStates(characterState)
+        .withWorldBuilding(worldBuilding)
+        .withReviewFocus(shardReviewFocus(this.params.reviewFocus, 'logic'))
+      shardPromises.push(
+        runLlmShard({
+          key: 'logic',
+          logName: promptLanguageText(writingLanguage, '因果与角色', 'causal & character'),
+          prompt: [builder.build(), ...authorSections].join('\n\n'),
+          systemRole: builder.getSystemRole(),
+          parse: parseShardReviewItems,
+          rebuildContract: itemsOnlyContract,
+        }).then(items => ({ key: 'logic' as const, items })),
+      )
+    }
+
+    {
+      const builder = new ReviewPromptBuilder(narrationTemplate, writingLanguage)
+        .withChapterContent(draft)
+      shardPromises.push(
+        runLlmShard({
+          key: 'narration',
+          logName: promptLanguageText(writingLanguage, '叙事规范', 'narration'),
+          prompt: builder.build(),
+          systemRole: builder.getSystemRole(),
+          parse: parseShardReviewItems,
+          rebuildContract: itemsOnlyContract,
+        }).then(items => ({ key: 'narration' as const, items })),
+      )
+    }
+
+    {
+      const goalPrompt = [
+        promptLanguageText(writingLanguage, '【待审章节】', '[Chapter under review]'),
+        draft,
+        buildChapterGoalReviewPrompt(frozenGoals, writingLanguage),
+      ].join('\n\n')
+      const goalSystemRole = promptLanguageText(
+        writingLanguage,
+        '你是一位严谨的小说审稿编辑。只依据文本证据完成本章目标的逐项核对。',
+        'You are a rigorous fiction continuity editor. Complete the per-goal checklist using only textual evidence.',
+      )
+      shardPromises.push(
+        runLlmShard({
+          key: 'goals',
+          logName: promptLanguageText(writingLanguage, '本章目标', 'chapter goals'),
+          prompt: goalPrompt,
+          systemRole: goalSystemRole,
+          parse: parseGoalShardResult,
+          rebuildContract: goalsOnlyContract,
+        }).then(goalReviews => ({ key: 'goals' as const, goalReviews })),
+      )
+    }
+
+    callbacks.log(text(
+      `并行执行 ${shardPromises.length} 个审稿分片...`,
+      `Running ${shardPromises.length} review shards in parallel...`,
+    ))
+
+    const settled = await Promise.allSettled(shardPromises)
+    this.assertNotCancelled(context)
+    // 任一分片两次尝试后仍失败则整体失败（fail-closed），错误点名该分片。
+    const firstRejection = settled.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+    if (firstRejection) throw firstRejection.reason
+    const outcomes = settled.map(outcome => (outcome as PromiseFulfilledResult<ShardOutcome>).value)
+
+    const mergedItems = dedupeReviewItems(
+      outcomes.flatMap(outcome => outcome.items ?? []),
+    ).slice(0, MERGED_REVIEW_ITEMS_LIMIT)
+    let parsedResult: ReviewLike = {
+      summary: synthesizeReviewSummary(mergedItems, context.uiLocale ?? 'zh-CN'),
+      items: mergedItems.map((item): Record<string, unknown> => ({
+        category: item.category,
+        severity: item.severity,
+        description: item.description,
+        ...(item.quote === undefined ? {} : { quote: item.quote }),
+      })),
+    }
+
+    const goalOutcomes = outcomes.filter(outcome => outcome.key === 'goals')
+    const goalReview = normalizeChapterGoalReview(goalOutcomes[0]?.goalReviews, frozenGoals, draft, writingLanguage)
     parsedResult.goalReview = goalReview
     parsedResult.items = [...(parsedResult.items ?? []), ...chapterGoalReviewItems(goalReview, writingLanguage)]
     if (parsedResult.items.some(item => item.severity === 'unknown')) {
@@ -391,6 +427,14 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     } else if (goalReview.items.some(item => item.status === 'unmet')) {
       parsedResult.summary = text('本章存在尚未完成的目标，请核对逐项证据。', 'Some chapter goals are unmet; check their evidence.')
     }
+
+    // 确定性重复检测：模型异常复读或续写拼接重叠产生的重复段落。
+    // 纯本地扫描，不依赖蓝图与外部数据，每次审稿必检；发现即并入报告。
+    parsedResult = mergeDuplicateSpansIntoReview(
+      parsedResult,
+      detectDuplicateParagraphs(draft),
+      context.uiLocale ?? 'zh-CN',
+    )
 
     const blueprint = await ipc.invokeWithProjectSession(
       projectSession, 'db:blueprint-get', this.params.chapterNumber, context.projectPath,
@@ -480,7 +524,7 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       `审查完成，已生成审稿报告 r${revIndex}`,
       `Review complete; created review report r${revIndex}`,
     ))
-    return this.stripThinkingTags(reviewResultRaw)
+    return JSON.stringify(parsedResult, null, 2)
   }
 
   private async readCharacterStates(
