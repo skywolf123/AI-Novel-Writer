@@ -1,6 +1,30 @@
 import type { WorkflowContext, StepCallbacks } from '../../../stores/workflow-store'
 import { globalEventBus, EventPayloadMap } from '../../../shared/event-bus'
 import type { LLMFinishReason, ProjectSessionContext } from '../../../shared/ipc-channels'
+
+/**
+ * 把 finishReason 枚举转成面向作者的可读短语，替代内部枚举直出。
+ * phrase 是调用方已绑定 locale 的双语文案函数。
+ */
+function finishReasonPhrase(
+  reason: LLMFinishReason,
+  phrase: (zhCNText: string, enUSText: string) => string,
+): string {
+  return phrase(
+    reason === 'stop' ? '正常完成'
+    : reason === 'length' ? '达到输出上限'
+    : reason === 'content_filter' ? '被内容安全过滤截断'
+    : reason === 'cancelled' ? '已取消'
+    : reason === 'error' ? '请求失败'
+    : '结束原因未知',
+    reason === 'stop' ? 'completed normally'
+    : reason === 'length' ? 'hit the output cap'
+    : reason === 'content_filter' ? 'truncated by content filtering'
+    : reason === 'cancelled' ? 'cancelled'
+    : reason === 'error' ? 'request failed'
+    : 'unknown finish reason',
+  )
+}
 import type { BasePromptBuilder } from '../../prompts/prompt-builder'
 import {
   createGenerationRuntime,
@@ -249,8 +273,8 @@ export abstract class BaseWorkflowCommand<TResult = string> {
     const text = (zhCNText: string, enUSText: string) => workflowUiText(context, zhCNText, enUSText)
     const completion = await this.callLLMResult(prompt, systemPrompt, callbacks, options, context)
     callbacks.log(text(
-      `  有界生成初始响应：finishReason=${completion.finishReason}`,
-      `  Initial bounded response: finishReason=${completion.finishReason}`,
+      `  生成结束：${finishReasonPhrase(completion.finishReason, text)}`,
+      `  Generation finished: ${finishReasonPhrase(completion.finishReason, text)}`,
     ))
     let continuationCount = 0
     return completeBoundedCompletion({
@@ -272,8 +296,8 @@ export abstract class BaseWorkflowCommand<TResult = string> {
       requestContinuation: async continuationPrompt => {
         continuationCount += 1
         callbacks.log(text(
-          `  自动续写第 ${continuationCount} 轮请求已发起`,
-          `  Automatic continuation request ${continuationCount} started`,
+          `  输出未完，自动续写第 ${continuationCount} 段`,
+          `  Output incomplete; continuing with segment ${continuationCount}`,
         ))
         const next = await this.callLLMResult(
           continuationPrompt,
@@ -283,8 +307,8 @@ export abstract class BaseWorkflowCommand<TResult = string> {
           context,
         )
         callbacks.log(text(
-          `  自动续写第 ${continuationCount} 轮响应：finishReason=${next.finishReason}`,
-          `  Automatic continuation response ${continuationCount}: finishReason=${next.finishReason}`,
+          `  续写第 ${continuationCount} 段结束：${finishReasonPhrase(next.finishReason, text)}`,
+          `  Continuation segment ${continuationCount} finished: ${finishReasonPhrase(next.finishReason, text)}`,
         ))
         return next
       },
@@ -336,8 +360,8 @@ export abstract class BaseWorkflowCommand<TResult = string> {
     }
     const prefix = options.taskLabel ? `${options.taskLabel} ` : ''
     options.callbacks.log(uiText(
-      `  ${prefix}初始响应：finishReason=${initial.finishReason}`,
-      `  ${prefix}initial response: finishReason=${initial.finishReason}`,
+      `  ${prefix}生成结束：${finishReasonPhrase(initial.finishReason, uiText)}`,
+      `  ${prefix}Generation finished: ${finishReasonPhrase(initial.finishReason, uiText)}`,
     ))
     return completeBoundedCompletion({
       initial,
@@ -358,8 +382,8 @@ export abstract class BaseWorkflowCommand<TResult = string> {
       requestContinuation: async continuationPrompt => {
         continuationCount += 1
         options.callbacks.log(uiText(
-          `  自动续写第 ${continuationCount} 轮请求已发起`,
-          `  Automatic continuation request ${continuationCount} started`,
+          `  输出未完，自动续写第 ${continuationCount} 段`,
+          `  Output incomplete; continuing with segment ${continuationCount}`,
         ))
         const next = await this.callLLMResult(
           continuationPrompt,
@@ -369,8 +393,8 @@ export abstract class BaseWorkflowCommand<TResult = string> {
           options.context,
         )
         options.callbacks.log(uiText(
-          `  自动续写第 ${continuationCount} 轮响应：finishReason=${next.finishReason}`,
-          `  Automatic continuation response ${continuationCount}: finishReason=${next.finishReason}`,
+          `  续写第 ${continuationCount} 段结束：${finishReasonPhrase(next.finishReason, uiText)}`,
+          `  Continuation segment ${continuationCount} finished: ${finishReasonPhrase(next.finishReason, uiText)}`,
         ))
         return next
       },

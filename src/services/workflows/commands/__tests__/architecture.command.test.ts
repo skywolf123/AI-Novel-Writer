@@ -1084,7 +1084,7 @@ describe('GenerateCharactersCommand structured roster seam', () => {
     })
     const visibleLogs = vi.mocked(stepCallbacks.log).mock.calls.map(([message]) => message).join('\n')
     expect(visibleLogs).toContain('Generating character graph...')
-    expect(visibleLogs).toContain('Initial bounded response: finishReason=stop')
+    expect(visibleLogs).toContain('Generation finished: completed normally')
     expect(visibleLogs).toContain('The character graph and 8 character cards were generated.')
     expect(visibleLogs).not.toMatch(/[\u3400-\u9fff]/u)
     expect(promptBudgetDiagnostic.mock.calls).toEqual(expect.arrayContaining([
