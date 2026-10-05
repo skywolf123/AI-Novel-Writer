@@ -1048,7 +1048,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
-          <DialogHeader className="px-4 py-0" style={{ height: 38, display: 'flex', alignItems: 'center' }}>
+          <DialogHeader className="px-4 py-4" style={{ height: 56, display: 'flex', alignItems: 'center' }}>
             <DialogTitle className="flex items-center gap-2 text-[0.8rem]">
               {text(
                 `修稿合并 — 第${meta?.chapterNumber ?? ''}章 ${meta?.chapterTitle || '未知标题'}`,
@@ -1057,7 +1057,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             </DialogTitle>
           </DialogHeader>
           {/* 合并视图主体 */}
-          <div className="flex-1 overflow-hidden" style={{ height: 'calc(85vh - 38px - 1px)' }}>
+          <div className="flex-1 overflow-hidden" style={{ height: 'calc(85vh - 56px - 1px)' }}>
             {mergeData && (
               <div className="flex h-full flex-col">
                 {mergeData.staleReason && (
