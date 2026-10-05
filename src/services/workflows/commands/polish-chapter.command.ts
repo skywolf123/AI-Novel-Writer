@@ -106,14 +106,15 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
     const sourceScore = analyzeProseQuality(source)
     // 候选稿胜负规则：门控 pass 的候选拥有最终裁决权；无 pass 时取确定性
     // 指标最优的候选；若所有候选都不优于原稿，则放弃并保留原稿。
+    // 平局取更晚轮次：晚轮包含此前全部门控修复，确定性持平即无回退证据。
     let best: PolishCandidate | null = null
     let passCandidate: PolishCandidate | null = null
     const logScore = (candidate: PolishCandidate) => text(
-      `  质量指标：${sourceScore.score.toFixed(2)} → ${candidate.score.toFixed(2)}（AI 痕迹越少越好）`,
-      `  Quality score: ${sourceScore.score.toFixed(2)} → ${candidate.score.toFixed(2)} (lower is better)`,
+      `  质量指标：${sourceScore.score.toFixed(2)} → ${candidate.score.toFixed(2)}（仅覆盖显性套路，隐性形态由门控负责）`,
+      `  Quality score: ${sourceScore.score.toFixed(2)} → ${candidate.score.toFixed(2)} (covers explicit patterns only; subtle issues are the gate's job)`,
     )
     const updateBest = (candidate: PolishCandidate) => {
-      if (!best || candidate.score < best.score) best = candidate
+      if (!best || candidate.score <= best.score) best = candidate
     }
 
     callbacks.log(text('AI 润色开始：全篇润色 → 质量门控 → 自动迭代（最多 3 轮）', 'AI polish started: full polish → gate → automatic iteration (max 3 rounds)'))
@@ -163,8 +164,8 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
       const patches = parseSpotPatches(this.stripThinkingTags(raw))
       const applied = applySpotPatches(baseText, patches)
       callbacks.log(text(
-        `  定点修复：补丁 ${patches.length} 个，命中 ${applied.applied} 个，丢弃 ${applied.missed} 个`,
-        `  Spot fix: ${patches.length} patches, ${applied.applied} applied, ${applied.missed} discarded`,
+        `  定点修复：生成 ${patches.length} 处修改，成功应用 ${applied.applied} 处，未匹配原文跳过 ${applied.missed} 处`,
+        `  Spot fix: ${patches.length} edits proposed, ${applied.applied} applied, ${applied.missed} skipped (no match)`,
       ))
       return { text: applied.text, score: 0, label: 'spot-fix' }
     }
@@ -200,13 +201,21 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
         llmRaw: llmRaw === null ? null : this.stripThinkingTags(llmRaw),
         locale,
       })
+      const actionLabel = text(
+        decision.action === 'pass' ? '通过，无需处理'
+        : decision.action === 'full-repolish' ? '整篇重润'
+        : '定点修复',
+        decision.action === 'pass' ? 'pass'
+        : decision.action === 'full-repolish' ? 'full re-polish'
+        : 'spot-fix',
+      )
       for (const note of decision.notes) callbacks.log(text(`  门控：${note}`, `  Gate: ${note}`))
       for (const problem of decision.problems) {
         callbacks.log(text(`  门控问题：${problem}`, `  Gate finding: ${problem}`))
       }
       callbacks.log(text(
-        `  门控判定：${decision.action}`,
-        `  Gate verdict: ${decision.action}`,
+        `  门控判定：${actionLabel}（${decision.problems.length} 处问题）`,
+        `  Gate verdict: ${actionLabel} (${decision.problems.length} findings)`,
       ))
       return decision
     }
@@ -217,7 +226,8 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
 
     // ── 第 1 轮：全篇润色 ──
     assertSessionCurrent('当前项目已切换，润色已停止', 'The project changed, so polishing stopped.')
-    const round1 = await polishChapter(source, '', 'polish-r1')
+    const roundLabel = (zh: string, en: string) => (locale === 'en-US' ? en : zh)
+    const round1 = await polishChapter(source, '', roundLabel('第1轮全篇润色', 'round 1 (full polish)'))
     assertComplete(round1.text)
     round1.score = analyzeProseQuality(round1.text).score
     updateBest(round1)
@@ -237,7 +247,7 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
       try {
         if (gateDecision.action === 'full-repolish') {
           callbacks.log(text('第 2 轮：根据门控反馈整篇重新润色', 'Round 2: full re-polish from the gate feedback'))
-          const round2 = await polishChapter(source, this.renderFeedback(gateDecision), 'polish-r2-full')
+          const round2 = await polishChapter(source, this.renderFeedback(gateDecision), roundLabel('第2轮全篇重润', 'round 2 (full re-polish)'))
           assertComplete(round2.text)
           round2.score = analyzeProseQuality(round2.text).score
           updateBest(round2)
@@ -248,7 +258,7 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
           const round2 = await spotFix(current.text, currentGateProblems)
           assertComplete(round2.text)
           round2.score = analyzeProseQuality(round2.text).score
-          round2.label = 'polish-r2-spot'
+          round2.label = roundLabel('第2轮定点修复', 'round 2 (spot fix)')
           updateBest(round2)
           callbacks.log(logScore(round2))
           current = round2
@@ -275,7 +285,7 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
         const round3 = await spotFix(current.text, currentGateProblems)
         assertComplete(round3.text)
         round3.score = analyzeProseQuality(round3.text).score
-        round3.label = 'polish-r3-spot'
+        round3.label = roundLabel('第3轮定点修复', 'round 3 (spot fix)')
         updateBest(round3)
         callbacks.log(logScore(round3))
       } catch (error) {

@@ -69,7 +69,7 @@ describe('decidePolishGate', () => {
       }),
     }))
     expect(decision.action).toBe('full-repolish')
-    expect(decision.problems.join('\n')).toContain('rhythm')
+    expect(decision.problems.join('\n')).toContain('〔节奏·全局〕')
   })
 
   it('downgrades full to spot-fix at gate 2', () => {
@@ -78,7 +78,7 @@ describe('decidePolishGate', () => {
       llmRaw: JSON.stringify({ verdict: 'full', problems: [{ type: 'rhythm', scope: 'global' }] }),
     }))
     expect(decision.action).toBe('spot-fix')
-    expect(decision.notes.join(' ')).toContain('局部修正')
+    expect(decision.notes.join(' ')).toContain('定点修复')
   })
 
   it('routes to spot-fix for local problems on a clean deterministic check', () => {
