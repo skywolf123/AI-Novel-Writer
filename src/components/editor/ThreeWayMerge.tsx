@@ -389,14 +389,16 @@ export function hunkChurn(pairs: LinePair[]): { del: number; add: number } {
 // ===== 渲染辅助 =====
 
 /** contentEditable 子组件 — 仅在挂载时设置内容 */
-function EditableCell({ text, onChange }: { text: string; onChange: (t: string) => void }) {
+function EditableCell({ text, onChange, cellRef }: {
+  text: string; onChange: (t: string) => void; cellRef?: (el: HTMLDivElement | null) => void
+}) {
   const ref = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     if (ref.current) ref.current.textContent = text || '\u00A0'
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return (
-    <div ref={ref} className="twm-editable" contentEditable
+    <div ref={el => { ref.current = el; cellRef?.(el) }} className="twm-editable" contentEditable
       suppressContentEditableWarning
       onInput={e => onChange((e.target as HTMLDivElement).innerText)} />
   )
@@ -524,35 +526,58 @@ export default function ThreeWayMerge({
     else hunkCellRefs.current.delete(index)
   }, [])
 
+  // 中栏可编辑单元格 ref（segment index → cell），用于导航时光标指示
+  const mergeCellRefs = useRef(new Map<number, HTMLDivElement>())
+  const setMergeCellRef = useCallback((segIdx: number, el: HTMLDivElement | null) => {
+    if (el) mergeCellRefs.current.set(segIdx, el)
+    else mergeCellRefs.current.delete(segIdx)
+  }, [])
+
   const [navPos, setNavPos] = useState(0)
   const navPosRef = useRef(0)
   navPosRef.current = navPos
 
-  const goToHunk = useCallback((i: number, behavior: ScrollBehavior = 'smooth') => {
+  const goToHunk = useCallback((i: number, behavior: ScrollBehavior = 'smooth', focusCell = true) => {
     if (hunks.length === 0) return
     const pos = ((i % hunks.length) + hunks.length) % hunks.length
     setNavPos(pos)
     hunkCellRefs.current.get(hunks[pos].index)
       ?.scrollIntoView({ block: 'center', behavior })
-  }, [hunks])
+    if (!focusCell) return
+    // 光标指示：聚焦该变更的中栏单元格，光标折叠到文本开头（:focus 高亮随之生效）
+    const segIdx: number | undefined = hunkSegIdx[hunks[pos].index]
+    const cell = segIdx === undefined ? undefined : mergeCellRefs.current.get(segIdx)
+    if (!cell) return
+    cell.focus({ preventScroll: true })
+    const sel = window.getSelection()
+    if (sel) {
+      const range = document.createRange()
+      range.selectNodeContents(cell)
+      range.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+  }, [hunks, hunkSegIdx])
 
-  // 打开视图时自动定位到第一处变更
+  // 打开视图时自动定位到第一处变更（只滚动，不抢焦点）
   useEffect(() => {
     if (hunks.length === 0) return
-    const id = requestAnimationFrame(() => goToHunk(0, 'auto'))
+    const id = requestAnimationFrame(() => goToHunk(0, 'auto', false))
     return () => cancelAnimationFrame(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 键盘快捷键：焦点在输入/编辑区时不响应
+  // 键盘快捷键：导航键（Alt+↑↓ / F3）总是响应；Enter 仅在焦点不在输入/编辑区时采纳
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement as HTMLElement | null
-      if (el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
       if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); goToHunk(navPosRef.current + 1) }
       else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); goToHunk(navPosRef.current - 1) }
       else if (e.key === 'F3') { e.preventDefault(); goToHunk(navPosRef.current + (e.shiftKey ? -1 : 1)) }
-      else if (e.key === 'Enter' && hunks.length > 0) { e.preventDefault(); toggleHunk(hunks[navPosRef.current].index) }
+      else if (e.key === 'Enter' && hunks.length > 0) {
+        const el = document.activeElement as HTMLElement | null
+        if (el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+        e.preventDefault(); toggleHunk(hunks[navPosRef.current].index)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -682,6 +707,7 @@ export default function ThreeWayMerge({
                 {/* 中栏 */}
                 <div className={`twm-cell twm-cell-center ${isApplied ? 'adopted' : 'pending'}`}>
                   <EditableCell key={`h${idx}-${isApplied ? 1 : 0}`} text={segTexts[idx] ?? ''}
+                    cellRef={el => setMergeCellRef(idx, el)}
                     onChange={t => setSegTexts(p => ({ ...p, [idx]: t }))} />
                 </div>
 
