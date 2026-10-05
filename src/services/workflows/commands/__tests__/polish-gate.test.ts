@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { GenerationHarnessError } from '../../../generation/generation-harness'
 import {
   applySpotPatches,
   decidePolishGate,
+  isSessionBudgetExhausted,
   parsePolishGateJson,
   parseSpotPatches,
 } from '../polish-gate'
@@ -109,6 +111,32 @@ describe('decidePolishGate', () => {
     expect(clean.llm.degraded).toBe(true)
     const dirty = decidePolishGate(input({ llmRaw: 'broken', candidateText: DIRTY }))
     expect(dirty.action).toBe('spot-fix')
+  })
+})
+
+describe('isSessionBudgetExhausted', () => {
+  it('recognizes session-level budget exhaustion codes', () => {
+    expect(isSessionBudgetExhausted(new GenerationHarnessError(
+      'REQUESTED_TOKEN_BUDGET_EXHAUSTED',
+      '生成会话已用尽请求 Token 预算。',
+    ))).toBe(true)
+    expect(isSessionBudgetExhausted(new GenerationHarnessError(
+      'ATTEMPT_BUDGET_EXHAUSTED',
+      '生成会话已用尽请求次数。',
+    ))).toBe(true)
+    expect(isSessionBudgetExhausted(new GenerationHarnessError(
+      'DEADLINE_EXHAUSTED',
+      '生成会话已超过截止时间。',
+    ))).toBe(true)
+  })
+
+  it('does not short-circuit on transient provider failures', () => {
+    expect(isSessionBudgetExhausted(new GenerationHarnessError(
+      'PROVIDER_REQUEST_FAILED',
+      '模型请求失败。',
+    ))).toBe(false)
+    expect(isSessionBudgetExhausted(new Error('网络错误'))).toBe(false)
+    expect(isSessionBudgetExhausted(null)).toBe(false)
   })
 })
 
