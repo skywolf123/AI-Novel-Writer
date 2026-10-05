@@ -109,9 +109,15 @@ jobs:
             Where-Object { $_.Name -notmatch '__uninstaller' } |
             Select-Object -First 1
           if (-not $installer) { throw 'No installer was produced' }
-          $notes = "Built from ${{ github.sha }} on this fork. The in-app updater still points at the upstream repository, so this release is not an update feed."
+          # Prefer the fork release notes file (e.g. .release/notes/v1.1.0-fork.7.md);
+          # fall back to a short placeholder when the file is missing.
+          $notesFile = ".release/notes/$env:RELEASE_TAG.md"
+          $notesArgs = @('--notes', "Built from ${{ github.sha }} on this fork. The in-app updater still points at the upstream repository, so this release is not an update feed.")
+          if (Test-Path -LiteralPath $notesFile) {
+            $notesArgs = @('--notes-file', $notesFile)
+          }
           # This workflow exists only on integration/runtime, so `gh release create`
           # would otherwise point the tag at the repository default branch (master)
           # instead of the commit that was actually packaged. Pin the tag to the
           # checked-out revision so the tag and the installer always agree.
-          gh release create $env:RELEASE_TAG $installer.FullName --repo $env:GITHUB_REPOSITORY --target ${{ github.sha }} --title $env:RELEASE_TAG --notes $notes
+          gh release create $env:RELEASE_TAG $installer.FullName --repo $env:GITHUB_REPOSITORY --target ${{ github.sha }} --title $env:RELEASE_TAG @notesArgs
