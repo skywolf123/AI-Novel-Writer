@@ -1,4 +1,9 @@
-import { BaseWorkflowCommand, CommandExecuteParams, type WorkflowGenerationRuntimeDependencies } from './base-command'
+import {
+  BaseWorkflowCommand,
+  CommandExecuteParams,
+  POLISH_FLOW_CONTINUATION_LIMITS,
+  type WorkflowGenerationRuntimeDependencies,
+} from './base-command'
 import { useProjectStore } from '../../../stores/project-store'
 import { resolvePromptTemplate } from '../../prompt-templates'
 import { ChapterPromptBuilder } from '../../prompts/prompt-builder'
@@ -40,9 +45,9 @@ interface PolishCandidate {
   label: string
 }
 
-const MAX_PROSE_CONTINUATIONS = 3
-const MAX_GATE_CONTINUATIONS = 1
-const MAX_PATCH_CONTINUATIONS = 2
+const MAX_PROSE_CONTINUATIONS = POLISH_FLOW_CONTINUATION_LIMITS.prose
+const MAX_GATE_CONTINUATIONS = POLISH_FLOW_CONTINUATION_LIMITS.gate
+const MAX_PATCH_CONTINUATIONS = POLISH_FLOW_CONTINUATION_LIMITS.patch
 
 /**
  * AI 润色（全自动多轮）：全篇润色 → 门控 →（全篇重润 | 定点修复）→ 门控
