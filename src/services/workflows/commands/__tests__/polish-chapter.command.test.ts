@@ -202,7 +202,7 @@ describe('PolishChapterCommand', () => {
     const thirdRequest = completeWithLease.mock.calls[2]?.[0].messages
       .map(message => message.content).join('\n') ?? ''
     expect(thirdRequest).toContain('上一稿存在以下问题')
-    expect(thirdRequest).toContain('rhythm')
+    expect(thirdRequest).toContain('〔节奏·全局〕')
     const payload = invoke.mock.calls.find(([channel]) => channel === 'db:revision-replace-pending')?.[1]
     expect(payload).toMatchObject({ revisionType: 'polish', content: CLEAN_POLISHED })
   })
@@ -237,7 +237,7 @@ describe('PolishChapterCommand', () => {
     const payload = invoke.mock.calls.find(([channel]) => channel === 'db:revision-replace-pending')?.[1]
     expect(payload).toMatchObject({ content: patched })
     const logText = vi.mocked(logs.log).mock.calls.map(([message]) => message).join('\n')
-    expect(logText).toContain('补丁 1 个，命中 1 个')
+    expect(logText).toContain('定点修复：生成 1 处修改，成功应用 1 处')
   })
 
   it('degrades to deterministic-only gating when the gate call fails', async () => {
@@ -303,7 +303,7 @@ describe('PolishChapterCommand', () => {
     expect(completeWithLease).toHaveBeenCalledTimes(4)
     const logText = vi.mocked(logs.log).mock.calls.map(([message]) => message).join('\n')
     expect(logText).toContain('门控问题：')
-    expect(logText).toContain('[ai-flavor]')
+    expect(logText).toContain('〔AI 痕迹〕')
     expect(logText).toContain('第 3 轮')
   })
 
@@ -348,6 +348,35 @@ describe('PolishChapterCommand', () => {
     // Derived worst path: (1+3) + (1+1) + (1+3) + (1+1) + (1+2) = 15 attempts,
     // token cap clamped to the absolute limit.
     expect(capturedBudget).toMatchObject({ maxAttempts: 15, maxRequestedOutputTokens: 147_456 })
+  })
+
+  it('prefers the latest candidate when deterministic scores tie (rounds keep their fixes)', async () => {
+    // 全程 0.00 平局时不得回滚到第 1 轮：第 3 轮包含前两轮门控修复，应胜出。
+    const cleanBase = '他把刀收回鞘中，转身出了巷子。雨已经停了，他加快脚步，往城南渡口走去。'
+    const r1 = cleanBase.repeat(30) + '院里的雪还在下。'
+    const r3 = cleanBase.repeat(30) + '院里的雪停了。'
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockResolvedValueOnce({ content: r1, finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: gateJson('spot', SPOT_PROBLEMS), finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: JSON.stringify({
+        patches: [{ find: '院里的雪还在下。', replace: '院里的雪还在落。' }],
+      }), finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: gateJson('spot', SPOT_PROBLEMS), finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: JSON.stringify({
+        patches: [{ find: '院里的雪还在落。', replace: '院里的雪停了。' }],
+      }), finishReason: 'stop' })
+    const invoke = revisionIpc()
+    stubIpc(invoke)
+
+    await command(completeWithLease, SOURCE).execute({
+      step: {},
+      context: workflowContext(),
+      callbacks: callbacks(),
+    })
+
+    expect(completeWithLease).toHaveBeenCalledTimes(5)
+    const payload = invoke.mock.calls.find(([channel]) => channel === 'db:revision-replace-pending')?.[1]
+    expect(payload).toMatchObject({ revisionType: 'polish', content: r3 })
   })
 
   it('injects the author polish guidance at the highest priority across rounds', async () => {
