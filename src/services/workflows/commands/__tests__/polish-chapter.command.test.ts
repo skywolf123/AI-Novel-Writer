@@ -282,6 +282,72 @@ describe('PolishChapterCommand', () => {
     expect(invoke.mock.calls.some(([channel]) => channel === 'db:revision-replace-pending')).toBe(false)
   })
 
+  it('keeps retrying provider-level failures in later rounds (only session-budget errors short-circuit)', async () => {
+    // provider 层失败被 harness 包装为 PROVIDER_REQUEST_FAILED（瞬时错误），
+    // 设计上第 3 轮仍应尝试；会话级预算耗尽由 harness 入口检查抛出（无法经
+    // provider mock 触发），其识别逻辑在 polish-gate.test.ts 单测覆盖。
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockResolvedValueOnce({ content: DIRTY_POLISHED, finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: gateJson('spot', SPOT_PROBLEMS), finishReason: 'stop' })
+      .mockRejectedValueOnce(new Error('provider transient failure'))
+    const invoke = revisionIpc()
+    stubIpc(invoke)
+
+    const logs = callbacks()
+    await expect(command(completeWithLease, SOURCE).execute({
+      step: {},
+      context: workflowContext(),
+      callbacks: logs,
+    })).rejects.toThrow('润色未能改善文本质量')
+
+    expect(completeWithLease).toHaveBeenCalledTimes(4)
+    const logText = vi.mocked(logs.log).mock.calls.map(([message]) => message).join('\n')
+    expect(logText).toContain('门控问题：')
+    expect(logText).toContain('[ai-flavor]')
+    expect(logText).toContain('第 3 轮')
+  })
+
+  it('opens the generation session with the dedicated polish budget', async () => {
+    let capturedBudget: unknown = null
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockResolvedValueOnce({ content: CLEAN_POLISHED, finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: gateJson('pass'), finishReason: 'stop' })
+    const runtimeDependencies: WorkflowGenerationRuntimeDependencies = {
+      createRuntime: options => {
+        capturedBudget = options.budget
+        return createGenerationRuntime(options, {
+          snapshotDefaultModelId: () => 'model-a',
+          beginModelExecution: async () => leaseReceipt(),
+          completeWithLease,
+          closeModelExecution: async () => {},
+        })
+      },
+    }
+    stubIpc(revisionIpc())
+
+    await new PolishChapterCommand({
+      draftPath: 'vela://draft/1',
+      draftContent: SOURCE,
+      sourceDraft: { id: 1, chapterNumber: 1, version: 1, status: 'draft', contentRevision: 1 },
+      chapterNumber: 1,
+      chapterInfo: {
+        projectPath: PROJECT_PATH,
+        chapterNumber: 1,
+        title: '第一章',
+        role: '开端',
+        purpose: '建立冲突',
+        keyEvents: '事件',
+        characters: [],
+      },
+    }, runtimeDependencies).execute({
+      step: {},
+      context: workflowContext(),
+      callbacks: callbacks(),
+    })
+
+    expect(capturedBudget).toMatchObject({ maxRequestedOutputTokens: 147_456, maxAttempts: 12 })
+  })
+
   it('injects the author polish guidance at the highest priority across rounds', async () => {
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
       .mockResolvedValueOnce({ content: CLEAN_POLISHED, finishReason: 'stop' })

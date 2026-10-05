@@ -223,3 +223,11 @@ export const POLISH_GATE_LIMITS = Object.freeze({
   minPatchFindLength: MIN_PATCH_FIND_LENGTH,
   maxPatches: MAX_PATCHES,
 })
+
+/** 会话级预算耗尽（Token/次数/截止时间）：后续轮必然同样失败，调用方应短路。 */
+export function isSessionBudgetExhausted(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'REQUESTED_TOKEN_BUDGET_EXHAUSTED'
+    || code === 'ATTEMPT_BUDGET_EXHAUSTED'
+    || code === 'DEADLINE_EXHAUSTED'
+}

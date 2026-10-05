@@ -17,7 +17,7 @@ import { assertMateriallyCompleteRevision } from './refinement-completeness'
 import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 import { analyzeProseQuality } from '../../../shared/prose-quality'
-import { applySpotPatches, decidePolishGate, parseSpotPatches } from './polish-gate'
+import { applySpotPatches, decidePolishGate, isSessionBudgetExhausted, parseSpotPatches } from './polish-gate'
 
 import type { ChapterInfo, FrozenDraftSourceIdentity } from '../chapter-workflow'
 import type { WritingLanguage } from '../../../shared/writing-language'
@@ -59,7 +59,7 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
   }
 
   async execute(params: CommandExecuteParams): Promise<string> {
-    return this.executeWithGenerationRuntime('text', params, () => this.executeWithinGeneration(params))
+    return this.executeWithGenerationRuntime('polish', params, () => this.executeWithinGeneration(params))
   }
 
   private polishPromptBlock(writingLanguage: WritingLanguage): string {
@@ -196,6 +196,9 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
         locale,
       })
       for (const note of decision.notes) callbacks.log(text(`  门控：${note}`, `  Gate: ${note}`))
+      for (const problem of decision.problems) {
+        callbacks.log(text(`  门控问题：${problem}`, `  Gate finding: ${problem}`))
+      }
       callbacks.log(text(
         `  门控判定：${decision.action}`,
         `  Gate verdict: ${decision.action}`,
@@ -219,6 +222,8 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
     let current = round1
     let currentGateProblems = gateDecision.problems
     if (gateDecision.action === 'pass') passCandidate = round1
+    // 会话级预算/次数耗尽后，后续轮必然同样失败；短路省掉空转。
+    let sessionBudgetExhausted = false
 
     if (gateDecision.action !== 'pass') {
       // ── 第 2 轮：全篇重润（全局问题）或定点修复（局部问题）──
@@ -248,6 +253,7 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
         if (gateDecision.action === 'pass') passCandidate = current
       } catch (error) {
         if (context.cancelled) throw error
+        if (isSessionBudgetExhausted(error)) sessionBudgetExhausted = true
         callbacks.log(text(
           `  第 2 轮失败，使用当前最优稿继续：${error instanceof Error ? error.message : String(error)}`,
           `  Round 2 failed; continuing from the best draft: ${error instanceof Error ? error.message : String(error)}`,
@@ -255,7 +261,7 @@ export class PolishChapterCommand extends BaseWorkflowCommand<string> {
       }
     }
 
-    if (gateDecision.action !== 'pass') {
+    if (gateDecision.action !== 'pass' && !sessionBudgetExhausted) {
       // ── 第 3 轮：最后一轮定点修复 ──
       this.assertNotCancelled(context)
       assertSessionCurrent('当前项目已切换，润色已停止', 'The project changed, so polishing stopped.')
