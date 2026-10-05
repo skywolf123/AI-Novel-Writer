@@ -345,7 +345,9 @@ describe('PolishChapterCommand', () => {
       callbacks: callbacks(),
     })
 
-    expect(capturedBudget).toMatchObject({ maxRequestedOutputTokens: 147_456, maxAttempts: 12 })
+    // Derived worst path: (1+3) + (1+1) + (1+3) + (1+1) + (1+2) = 15 attempts,
+    // token cap clamped to the absolute limit.
+    expect(capturedBudget).toMatchObject({ maxAttempts: 15, maxRequestedOutputTokens: 147_456 })
   })
 
   it('injects the author polish guidance at the highest priority across rounds', async () => {

@@ -98,6 +98,19 @@ export function injectWritingSkillIntoSession(
 export type WorkflowGenerationIntent = 'structured' | 'text' | 'character-architecture' | 'polish'
 
 /**
+ * Continuation allowances of the AI polish flow, shared between the command
+ * and its budget derivation so the two can never drift apart.
+ */
+export const POLISH_FLOW_CONTINUATION_LIMITS = Object.freeze({
+  /** Full-chapter polish call (R1 / R2 full re-polish). */
+  prose: 3,
+  /** Gate judgment call (G1 / G2). */
+  gate: 1,
+  /** Spot-fix patch call (R2 spot / R3). */
+  patch: 2,
+})
+
+/**
  * Intent cost ceilings are product policy, never model profiles. The runtime
  * still plans every physical request from the frozen lease capability receipt.
  *
@@ -131,12 +144,18 @@ export const WORKFLOW_GENERATION_BUDGETS = Object.freeze({
     deadlineMs: 20 * 60_000,
   }),
   polish: Object.freeze({
-    // Worst path: full polish + gate + (full re-polish | spot-fix) + gate +
-    // final spot-fix. Every call reserves the model's full output ceiling
-    // (32,768), so five calls can demand 163,840; the absolute cap 147,456
-    // still leaves a shrunken-but-usable reservation for the small final
-    // patch output.
-    maxAttempts: 12,
+    // Derived from the polish flow's structural worst path — never hand-tuned:
+    // R1 full polish + G1 gate + R2 (full re-polish, the worse branch) + G2 gate
+    // + R3 final spot-fix, each with its own continuation allowance. Editing the
+    // flow's continuation constants below re-prices this budget automatically.
+    maxAttempts: (() => {
+      const attempts = (1 + POLISH_FLOW_CONTINUATION_LIMITS.prose)
+        + (1 + POLISH_FLOW_CONTINUATION_LIMITS.gate)
+        + (1 + POLISH_FLOW_CONTINUATION_LIMITS.prose)
+        + (1 + POLISH_FLOW_CONTINUATION_LIMITS.gate)
+        + (1 + POLISH_FLOW_CONTINUATION_LIMITS.patch)
+      return Math.min(attempts, GENERATION_ABSOLUTE_BUDGET_LIMITS.maxAttempts)
+    })(),
     maxRequestedOutputTokens: GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokens,
     maxRequestedOutputTokensPerAttempt:
       GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
