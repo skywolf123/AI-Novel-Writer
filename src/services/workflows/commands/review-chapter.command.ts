@@ -22,6 +22,7 @@ import type { FrozenDraftSourceIdentity } from '../chapter-workflow'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 import { CHARACTER_STATE_TEXT_FIELDS } from '../../../shared/character-roster'
 import { buildChapterGoalReviewPrompt, chapterGoalReviewItems, freezeChapterGoals, normalizeChapterGoalReview } from '../../../shared/chapter-goal-review'
+import { detectDuplicateParagraphs, mergeDuplicateSpansIntoReview } from '../../../shared/duplicate-spans'
 
 
 export interface ReviewChapterParams {
@@ -376,6 +377,14 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     } else if (goalReview.items.some(item => item.status === 'unmet')) {
       parsedResult.summary = text('本章存在尚未完成的目标，请核对逐项证据。', 'Some chapter goals are unmet; check their evidence.')
     }
+
+    // 确定性重复检测：模型异常复读或续写拼接重叠产生的重复段落。
+    // 纯本地扫描，不依赖蓝图与外部数据，每次审稿必检；发现即并入报告。
+    parsedResult = mergeDuplicateSpansIntoReview(
+      parsedResult,
+      detectDuplicateParagraphs(draft),
+      context.uiLocale ?? 'zh-CN',
+    )
 
     const blueprint = await ipc.invokeWithProjectSession(
       projectSession, 'db:blueprint-get', this.params.chapterNumber, context.projectPath,
