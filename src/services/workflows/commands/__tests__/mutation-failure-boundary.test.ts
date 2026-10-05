@@ -151,6 +151,24 @@ function stubLlm(command: object, response: string): void {
   }
 }
 
+/** 审稿分片感知的 LLM stub：按 purpose 路由目标分片与通用分片的合同响应 */
+function stubShardLlm(
+  command: ReviewChapterCommand,
+  payloads: { items?: string; goals?: string },
+): void {
+  vi.spyOn(command as unknown as {
+    callLLMWithBoundedCompletion: (...args: unknown[]) => Promise<string>
+  }, 'callLLMWithBoundedCompletion').mockImplementation(async (...args: unknown[]) => {
+    const options = args[4] as { purpose?: string } | undefined
+    if (options?.purpose?.startsWith('review-chapter-goals')) {
+      return payloads.goals ?? JSON.stringify({ goalReviews: [] })
+    }
+    return payloads.items ?? JSON.stringify({
+      items: [{ category: '剧情连贯性', severity: 'pass', description: '未发现矛盾' }],
+    })
+  })
+}
+
 function stubVelaIpc(invoke: (channel: string, ...args: unknown[]) => Promise<unknown>): void {
   vi.stubGlobal('window', {
     velaAPI: {
@@ -1148,27 +1166,31 @@ describe('workflow mutation failure boundaries', () => {
       throw new Error(`unexpected IPC: ${channel}`)
     })
     stubVelaIpc(invoke)
-    let prompt = ''
+    const goalPrompts: string[] = []
+    const goalReviews = [
+      ...(includeDueGoal ? [{ id: 'ch1:keyEvents:1', status: 'unmet', description: '本章要求完成，相册装订却延期。', evidence: [{ quote: includeDueGoal === 'invalid-evidence' ? '正文不存在的引文' : '明天再装订相册' }] }] : []),
+      { id: 'ch1:keyEvents:2', status: 'completed', description: '约定已达成，无需本章提前搬设备。', evidence: [{ quote: '两人约定周三搬设备。' }] },
+    ]
     const generateStream = vi.fn(async (messages, streamCallbacks) => {
-      prompt = messages.map((message: { content: string }) => message.content).join('\n')
+      const prompt = messages.map((message: { content: string }) => message.content).join('\n')
+      if (!prompt.includes('本章目标逐项核对')) {
+        streamCallbacks.onDone?.(JSON.stringify({
+          items: [{ category: '连续性', severity: 'pass', description: '未发现其他冲突。' }],
+        }), undefined, 'stop')
+        return 'item-shard-request'
+      }
+      goalPrompts.push(prompt)
       // A late editor change must not replace the checklist sent with this draft.
       blueprint.keyEvents = '仅准备相册'
-      streamCallbacks.onDone?.(JSON.stringify({
-        summary: '全部通过',
-        items: [{ category: '连续性', severity: 'pass', description: '未发现其他冲突。' }],
-        goalReviews: [
-          ...(includeDueGoal ? [{ id: 'ch1:keyEvents:1', status: 'unmet', description: '本章要求完成，相册装订却延期。', evidence: [{ quote: includeDueGoal === 'invalid-evidence' ? '正文不存在的引文' : '明天再装订相册' }] }] : []),
-          { id: 'ch1:keyEvents:2', status: 'completed', description: '约定已达成，无需本章提前搬设备。', evidence: [{ quote: '两人约定周三搬设备。' }] },
-        ],
-      }), undefined, 'stop')
-      return 'single-review-request'
+      streamCallbacks.onDone?.(JSON.stringify({ goalReviews }), undefined, 'stop')
+      return 'goals-shard-request'
     })
     useLLMStore.setState({ defaultModelId: 'model', generateStream })
     await new ReviewChapterCommand({ draftPath: 'vela://draft/1', draftContent: draft, chapterNumber: 1 })
       .execute({ step: {}, context: context(), callbacks: callbacks() })
-    expect(generateStream).toHaveBeenCalledTimes(1)
-    expect(prompt).toContain('ch1:keyEvents:1')
-    expect(prompt).not.toContain('ch2:keyEvents:1')
+    expect(goalPrompts).toHaveLength(1)
+    expect(goalPrompts[0]).toContain('ch1:keyEvents:1')
+    expect(goalPrompts[0]).not.toContain('ch2:keyEvents:1')
     expect(saved.summary).not.toBe('全部通过')
     expect(saved.goalReview).toMatchObject({ items: [
       { id: 'ch1:keyEvents:1', text: '完成相册', status: includeDueGoal === true ? 'unmet' : 'unknown' },
@@ -1198,10 +1220,11 @@ describe('workflow mutation failure boundaries', () => {
       draftContent: '待审正文',
       chapterNumber: 1,
     })
-    stubLlm(command, JSON.stringify({
-      summary: 'ok',
-      items: [{ category: 'continuity', severity: 'pass', description: 'No conflict found.' }],
-    }))
+    stubShardLlm(command, {
+      items: JSON.stringify({
+        items: [{ category: 'continuity', severity: 'pass', description: 'No conflict found.' }],
+      }),
+    })
 
     await expect(command.execute({
       step: {},
@@ -1255,12 +1278,17 @@ describe('workflow mutation failure boundaries', () => {
       throw new Error(`unexpected IPC: ${channel}`)
     })
     stubVelaIpc(invoke)
-    let observedReviewPrompt = ''
+    const observedReviewPrompts: string[] = []
+    const itemShardResponse = JSON.stringify({ items: review.items })
     useLLMStore.setState({
       defaultModelId: 'model',
       generateStream: vi.fn(async (messages, streamCallbacks) => {
-        observedReviewPrompt = messages.map((message: { content: string }) => message.content).join('\n')
-        streamCallbacks.onDone?.(JSON.stringify(review), undefined, 'stop')
+        const prompt = messages.map((message: { content: string }) => message.content).join('\n')
+        observedReviewPrompts.push(prompt)
+        const response = prompt.includes('本章目标逐项核对')
+          ? JSON.stringify({ goalReviews: [] })
+          : itemShardResponse
+        streamCallbacks.onDone?.(response, undefined, 'stop')
         return 'review-request'
       }),
     })
@@ -1274,7 +1302,7 @@ describe('workflow mutation failure boundaries', () => {
       step: {},
       context: context(),
       callbacks: callbacks(),
-    })).resolves.toBe(JSON.stringify(review))
+    })).resolves.toContain('剧情连贯性')
 
     const persisted = JSON.parse(persistedContent) as {
       summary: string
@@ -1285,6 +1313,7 @@ describe('workflow mutation failure boundaries', () => {
     expect(persisted.items.slice(0, 5).map(item => item.quote === undefined ? 0 : Array.from(item.quote).length)).toEqual([154, 147, 0, 0, 69])
     expect(persisted.items[5]).toMatchObject({ severity: 'unknown' })
     expect(useEditorStore.getState().tabs).toHaveLength(1)
+    const observedReviewPrompt = observedReviewPrompts.join('\n')
     expect(observedReviewPrompt).toContain('全部 items 必须为 1–10 条')
     expect(observedReviewPrompt).toContain('quote 不超过 160 字')
     expect(observedReviewPrompt).toContain('description 不超过 200 字')
@@ -1301,7 +1330,6 @@ describe('workflow mutation failure boundaries', () => {
       ],
       summary: '章节结构扎实，但存在两处轻微不一致。',
     }
-    const response = `\`\`\`json\n${JSON.stringify(review, null, 2)}\n\`\`\``
     let persistedContent = ''
     const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
       if (channel === 'kb:search') return []
@@ -1324,13 +1352,13 @@ describe('workflow mutation failure boundaries', () => {
       draftContent: '待审正文',
       chapterNumber: 1,
     })
-    stubLlm(command, response)
+    stubShardLlm(command, { items: JSON.stringify({ items: review.items }) })
 
     await expect(command.execute({
       step: {},
       context: context(),
       callbacks: callbacks(),
-    })).resolves.toBe(response)
+    })).resolves.toContain('剧情合理性')
 
     const persisted = JSON.parse(persistedContent) as typeof review
     expect(persisted.items).toHaveLength(5)
@@ -1433,7 +1461,7 @@ describe('workflow mutation failure boundaries', () => {
       step: {},
       context: { ...context(), uiLocale: 'en-US', writingLanguage: 'en-US' },
       callbacks: callbacks(),
-    })).rejects.toThrow('The AI review response was invalid twice')
+    })).rejects.toThrow('failed the review contract validation twice')
 
     expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('db:review-create')
     expect(useEditorStore.getState().tabs).toEqual([])
@@ -1445,18 +1473,18 @@ describe('workflow mutation failure boundaries', () => {
       uiLocale: 'en-US' as const,
       writingLanguage: 'zh-CN' as const,
       response: 'not-json',
-      expectedLog: 'The review result failed validation (the output is not complete JSON (it may be truncated by the model output limit)); requesting one complete replacement...',
-      expectedError: 'The AI review response was invalid twice (the replacement output is still not complete JSON)',
-      expectedPrompt: '上一轮审稿输出未通过合同校验',
+      expectedLog: '  Shard [事实线] failed contract validation; requesting one complete replacement...',
+      expectedError: 'Shard [事实线] failed the review contract validation twice',
+      expectedPrompt: '上一轮分片输出未通过合同校验',
     },
     {
       name: 'Chinese UI with English writing',
       uiLocale: 'zh-CN' as const,
       writingLanguage: 'en-US' as const,
       response: '{}',
-      expectedLog: '审稿结果未通过校验（输出不符合审稿报告合同（字段缺失、越界或多余）），正在请求一次完整替代输出...',
-      expectedError: 'AI 返回的审稿结果两次均无效（替代输出仍不符合审稿报告合同）',
-      expectedPrompt: 'The previous review output failed contract validation',
+      expectedLog: '  分片[continuity]输出未通过合同校验，正在请求一次完整替代输出...',
+      expectedError: '分片[continuity]两次输出均未通过审稿合同校验',
+      expectedPrompt: 'The previous shard output failed contract validation',
     },
   ])('keeps $name diagnostics in the UI language while rebuilding in the writing language', async ({
     uiLocale,
@@ -1490,14 +1518,20 @@ describe('workflow mutation failure boundaries', () => {
     })).rejects.toThrow(expectedError)
 
     expect(stepCallbacks.log).toHaveBeenCalledWith(expectedLog)
-    expect(llm.mock.calls[1]?.[0]).toContain(expectedPrompt)
+    expect(llm.mock.calls.some(([prompt]) => String(prompt).includes(expectedPrompt))).toBe(true)
     expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('db:review-create')
   })
 
   it('replaces one length-truncated review with complete JSON before persistence', async () => {
+    const sourceDraft = [
+      'SOURCE_DRAFT_HEAD',
+      '甲'.repeat(10_000),
+      'SOURCE_DRAFT_MIDDLE_CONFLICT',
+      '乙'.repeat(10_000),
+      'SOURCE_DRAFT_TAIL',
+    ].join('\n')
     const completeReview = JSON.stringify({
       items: [{ category: '剧情连贯性', severity: 'pass', description: '未发现矛盾' }],
-      summary: '审稿完成',
     })
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'kb:search') return []
@@ -1512,22 +1546,36 @@ describe('workflow mutation failure boundaries', () => {
       throw new Error(`unexpected IPC: ${channel}`)
     })
     stubVelaIpc(invoke)
+    const shardAttempts = new Map<string, number>()
     const generateStream = vi.fn(async (
-      _messages: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[0],
+      messages: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[0],
       streamCallbacks: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[1],
     ) => {
-      const firstAttempt = generateStream.mock.calls.length === 1
-      streamCallbacks.onDone?.(
-        firstAttempt ? '{"items":[' : completeReview,
-        undefined,
-        firstAttempt ? 'length' : 'stop',
-      )
-      return `request-${generateStream.mock.calls.length}`
+      const prompt = messages.map(message => message.content).join('\n')
+      const shardKey = prompt.includes('本章目标逐项核对')
+        ? 'goals'
+        : prompt.includes('因果与角色审查')
+          ? 'logic'
+          : prompt.includes('叙事规范审查')
+            ? 'narration'
+            : 'continuity'
+      const attempt = (shardAttempts.get(shardKey) ?? 0) + 1
+      shardAttempts.set(shardKey, attempt)
+      if (shardKey === 'goals') {
+        streamCallbacks.onDone?.(JSON.stringify({ goalReviews: [] }), undefined, 'stop')
+        return 'goals-request'
+      }
+      if (shardKey === 'continuity' && attempt === 1) {
+        streamCallbacks.onDone?.('{"items":[', undefined, 'length')
+        return 'continuity-truncated'
+      }
+      streamCallbacks.onDone?.(completeReview, undefined, 'stop')
+      return `request-${shardKey}-${attempt}`
     })
     useLLMStore.setState({ defaultModelId: 'model', generateStream })
     const command = new ReviewChapterCommand({
       draftPath: 'vela://draft/1',
-      draftContent: '待审正文',
+      draftContent: sourceDraft,
       chapterNumber: 1,
     })
 
@@ -1535,19 +1583,30 @@ describe('workflow mutation failure boundaries', () => {
       step: {},
       context: context(),
       callbacks: callbacks(),
-    })).resolves.toBe(completeReview)
+    })).resolves.toContain('未发现矛盾')
 
-    expect(generateStream).toHaveBeenCalledTimes(2)
-    expect(generateStream.mock.calls[1]?.[0][1]?.content).toContain('上一轮结构化输出因长度限制而中断')
+    // 事实线：截断初始 + 1 次续写；逻辑/叙事/目标各 1 次
+    expect(generateStream).toHaveBeenCalledTimes(5)
+    const replacementCall = generateStream.mock.calls.find(([messages]) => (
+      messages.map((message: { content: string }) => message.content).join('\n')
+        .includes('上一轮结构化输出因长度限制而中断')
+    ))
+    expect(replacementCall).toBeDefined()
+    const replacementRequest = replacementCall![0]
+      .map((message: { content: string }) => message.content).join('\n')
+    expect(replacementRequest).toContain('SOURCE_DRAFT_HEAD')
+    expect(replacementRequest).toContain('SOURCE_DRAFT_MIDDLE_CONFLICT')
+    expect(replacementRequest).toContain('SOURCE_DRAFT_TAIL')
     expect(invoke.mock.calls.filter(([channel]) => channel === 'db:review-create')).toHaveLength(1)
   })
 
   it('recovers a stop-reported truncated review with one complete replacement before persistence', async () => {
     // 模型/网关在输出上限截断时把 finishReason 报成 stop（而非 length）：
-    // 坏 JSON 直接进入解析 → 命令应自动补一次完整替代输出并成功保存。
+    // 坏 JSON 直接进入解析 → 分片内应自动补一次完整替代输出并成功保存。
     const completeReview = JSON.stringify({
       items: [{ category: '剧情连贯性', severity: 'pass', description: '未发现矛盾' }],
-      summary: '审稿完成',
+    })
+    const goalsReview = JSON.stringify({
       goalReviews: [{ id: 'ch1:keyEvents:1', status: 'completed', description: '借书已归还。', evidence: [{ quote: '她将借书交还管理员。' }] }],
     })
     const originalDraft = '她将借书交还管理员。'
@@ -1571,21 +1630,29 @@ describe('workflow mutation failure boundaries', () => {
     })
     stubVelaIpc(invoke)
     const rebuildPrompts: string[] = []
+    const shardAttempts = new Map<string, number>()
     const generateStream = vi.fn(async (
       messages: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[0],
       streamCallbacks: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[1],
     ) => {
-      const firstAttempt = generateStream.mock.calls.length === 1
-      if (firstAttempt) blueprint.keyEvents = '生成期间外部改写的目标'
-      if (!firstAttempt) {
-        rebuildPrompts.push(messages.map(message => message.content).join('\n'))
+      const prompt = messages.map(message => message.content).join('\n')
+      const shardKey = prompt.includes('本章目标逐项核对')
+        ? 'goals'
+        : prompt.includes('因果与角色审查')
+          ? 'logic'
+          : prompt.includes('叙事规范审查')
+            ? 'narration'
+            : 'continuity'
+      const attempt = (shardAttempts.get(shardKey) ?? 0) + 1
+      shardAttempts.set(shardKey, attempt)
+      if (attempt === 1) {
+        if (shardKey === 'goals') blueprint.keyEvents = '生成期间外部改写的目标'
+        streamCallbacks.onDone?.('{"summary":"审稿","items":[', undefined, 'stop')
+        return `review-request-${shardKey}-1`
       }
-      streamCallbacks.onDone?.(
-        firstAttempt ? '{"summary":"审稿","items":[' : completeReview,
-        undefined,
-        'stop',
-      )
-      return `review-request-${generateStream.mock.calls.length}`
+      rebuildPrompts.push(prompt)
+      streamCallbacks.onDone?.(shardKey === 'goals' ? goalsReview : completeReview, undefined, 'stop')
+      return `review-request-${shardKey}-${attempt}`
     })
     useLLMStore.setState({ defaultModelId: 'model', generateStream })
     const command = new ReviewChapterCommand({
@@ -1598,16 +1665,17 @@ describe('workflow mutation failure boundaries', () => {
       step: {},
       context: context(),
       callbacks: callbacks(),
-    })).resolves.toBe(completeReview)
+    })).resolves.toContain('未发现矛盾')
 
-    expect(generateStream).toHaveBeenCalledTimes(2)
-    expect(rebuildPrompts[0]).toContain('上一轮审稿输出未通过合同校验')
-    expect(rebuildPrompts[0]).toContain('完整审稿 JSON')
-    expect(rebuildPrompts[0]).toContain('根字段为 summary、items、goalReviews')
-    expect(rebuildPrompts[0]).toContain('【本章目标逐项核对｜软件冻结清单】')
-    expect(rebuildPrompts[0]).toContain('归还借书')
-    expect(rebuildPrompts[0]).toContain(originalDraft)
-    expect(rebuildPrompts[0]).not.toContain('生成期间外部改写的目标')
+    // 四个分片各自：坏初始响应 + 一次完整替代输出
+    expect(generateStream).toHaveBeenCalledTimes(8)
+    expect(rebuildPrompts[0]).toContain('上一轮分片输出未通过合同校验')
+    expect(rebuildPrompts[0]).toContain('原始审稿任务')
+    expect(rebuildPrompts.some(prompt => prompt.includes('根字段仅 items'))).toBe(true)
+    expect(rebuildPrompts.some(prompt => prompt.includes('【本章目标逐项核对｜软件冻结清单】'))).toBe(true)
+    expect(rebuildPrompts.some(prompt => prompt.includes('归还借书'))).toBe(true)
+    expect(rebuildPrompts.every(prompt => prompt.includes(originalDraft))).toBe(true)
+    expect(rebuildPrompts.every(prompt => !prompt.includes('生成期间外部改写的目标'))).toBe(true)
     expect(saved.goalReview).toMatchObject({ coverage: 'complete', items: [{ text: '归还借书', status: 'completed' }] })
     expect(saved.items).toHaveLength(2) // 通用项+目标项，只有最终有效响应被归一化一次。
     expect(invoke.mock.calls.filter(([channel]) => channel === 'db:review-create')).toHaveLength(1)
@@ -1641,7 +1709,8 @@ describe('workflow mutation failure boundaries', () => {
       callbacks: callbacks(),
     })).rejects.toThrow('Automatic continuation ran 1 time, but the output is not yet complete')
 
-    expect(generateStream).toHaveBeenCalledTimes(2)
+    // 四个分片各自：截断初始 + 一次续写（仍截断）后 fail-closed
+    expect(generateStream).toHaveBeenCalledTimes(8)
     expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('db:review-create')
   })
 })

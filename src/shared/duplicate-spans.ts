@@ -189,3 +189,18 @@ export function mergeDuplicateSpansIntoReview(
   }))
   return { ...review, items: [...(Array.isArray(review.items) ? review.items : []), ...mapped] }
 }
+
+/**
+ * 生成/修订出口硬校验：候选稿出现整段逐字重复（腐蚀性重复的最强信号，
+ * 典型来源是续写拼接重叠或模型复读）时拒绝保存。近似重复与短回环不在
+ * 此拦截——前者由审稿报告 warning 呈现，后者可能是功能性呼应。
+ */
+export function assertNoExactDuplicateParagraphs(candidate: string, locale: 'zh-CN' | 'en-US'): void {
+  const blocking = detectDuplicateParagraphs(candidate)
+    .filter(finding => finding.kind === 'exact-paragraph')
+  const first = blocking[0]
+  if (!first) return
+  throw new Error(locale === 'en-US'
+    ? `The generated text contains identical duplicated paragraphs (paragraphs ${first.paragraphNumbers.join(', ')}), likely a model-output glitch. Nothing was saved; retry the generation.`
+    : `生成结果中存在完全重复的段落（第 ${first.paragraphNumbers.join('、')} 段），疑似模型输出异常，结果未被保存。请重试本次生成。`)
+}

@@ -38,6 +38,9 @@ export const CORE_LOCALIZED_BUILTIN_PROMPT_KEYS = Object.freeze([
   'next_chapter_draft',
   'refine_chapter',
   'consistency_check',
+  'consistency_check_continuity',
+  'consistency_check_logic',
+  'consistency_check_narration',
   'refine_from_review',
   'generate_chapter_notes',
   'update_character_cards',
@@ -453,6 +456,92 @@ Output exactly one JSON object in this shape:
 {"items":[{"category":"plot continuity","severity":"pass","description":"No contradiction found"},{"category":"causal logic","severity":"error","quote":"exact source sentence","description":"verified problem"}],"summary":"one-sentence overall assessment"}
 
 severity must be error, warning, or pass. Return 1–10 items total. A review dimension does not need its own item; do not add pass items merely to cover categories, and never repeat the same issue. Keep each quote within 160 characters, each description within 200 characters, and summary within 120 characters. quote may be omitted only for pass items. Do not output Markdown, explanation, or reasoning.`,
+  },
+  consistency_check_continuity: {
+    systemRole: 'You are a rigorous fiction continuity editor. Review only the factual thread of this chapter against established history, using explicit categories and concrete textual evidence.',
+    content: `Review the chapter's factual thread.
+
+[Chapter under review]
+{{chapter_content}}
+
+[Established finalized history]
+{{global_summary}}
+
+[Current and future blueprints/plans — not established history]
+{{future_blueprints}}
+
+[Review principles]
+1. Report only issues supported by a specific quotation from the chapter.
+2. Prefer no issue over an invented issue. A checked dimension with no verified problem may be omitted or represented by one pass item; do not pad the item count.
+3. Do not report style preferences or optional craft suggestions. Report only verifiable factual contradictions.
+4. Every reported issue must be independently checkable by another editor.
+
+[Review dimensions]
+1. Plot continuity against established history, and internal self-contradiction.
+2. Chapter-to-chapter connections, including hooks and setup.
+3. Foreshadowing that should have been addressed, and new facts that contradict it.`,
+    systemSuffix: `[Author-requested review focus — prioritize when present]
+{{review_focus}}
+
+[JSON output contract]
+Output exactly one JSON object in this shape:
+{"items":[{"category":"plot continuity","severity":"pass","description":"No contradiction found"},{"category":"foreshadowing","severity":"error","quote":"exact source sentence","description":"verified problem"}]}
+
+severity must be error, warning, or pass. The root object allows only items; never output summary, goalReviews, or any other field. Return 1–10 items total; do not add pass items merely to cover categories, and never repeat the same issue. Keep each quote within 160 characters and each description within 200 characters. quote may be omitted only for pass items. Do not output Markdown, explanation, or reasoning.`,
+  },
+  consistency_check_logic: {
+    systemRole: 'You are a rigorous fiction continuity editor. Review only causal logic, motivation, and character-state consistency, using explicit categories and concrete textual evidence.',
+    content: `Review the chapter's causal logic and character consistency.
+
+[Chapter under review]
+{{chapter_content}}
+
+[Known character states]
+{{character_states}}
+
+[Established world rules]
+{{world_building}}
+
+[Review principles]
+1. Report only issues supported by a specific quotation from the chapter.
+2. Prefer no issue over an invented issue. A checked dimension with no verified problem may be omitted or represented by one pass item; do not pad the item count.
+3. Do not report style preferences or optional craft suggestions. Report only verifiable contradictions or causal failures.
+4. Every reported issue must be independently checkable by another editor.
+
+[Review dimensions]
+1. Causal logic, motivation plausibility, and factual common-sense failures.
+2. Character behavior, capability, location, and emotional state against the character-state records.`,
+    systemSuffix: `[Author-requested review focus — prioritize when present]
+{{review_focus}}
+
+[JSON output contract]
+Output exactly one JSON object in this shape:
+{"items":[{"category":"causal logic","severity":"pass","description":"No causal or motivation problem found"},{"category":"character state","severity":"warning","quote":"exact source sentence","description":"minor inconsistency"}]}
+
+severity must be error, warning, or pass. The root object allows only items; never output summary, goalReviews, or any other field. Return 1–10 items total; do not add pass items merely to cover categories, and never repeat the same issue. Keep each quote within 160 characters and each description within 200 characters. quote may be omitted only for pass items. Do not output Markdown, explanation, or reasoning.`,
+  },
+  consistency_check_narration: {
+    systemRole: 'You are a rigorous fiction continuity editor. Review only narrative-person and viewpoint consistency, using explicit categories and concrete textual evidence.',
+    content: `Review the chapter's narrative conventions.
+
+[Chapter under review]
+{{chapter_content}}
+
+[Review principles]
+1. Report only issues supported by a specific quotation from the chapter.
+2. Prefer no issue over an invented issue. A checked dimension with no verified problem may be omitted or represented by one pass item; do not pad the item count.
+3. Do not report style preferences or optional craft suggestions. Report only mechanically verifiable narrative-convention violations.
+4. Every reported issue must be independently checkable by another editor.
+
+[Review dimensions]
+1. Person consistency: determine the chapter's dominant narrative person (first or third), then flag narration sentences in the other person. Dialogue, quoted speech, and clearly marked interior monologue are exempt.
+2. Viewpoint authority: narration must not exceed what the current viewpoint character can perceive (omniscient excepted), and must not switch viewpoint characters inside one scene without a marked transition.
+3. Tense sliding: narration tense must not switch without rhetorical intent.`,
+    systemSuffix: `[JSON output contract]
+Output exactly one JSON object in this shape:
+{"items":[{"category":"person consistency","severity":"error","quote":"exact source sentence","description":"first-person sentence inside third-person narration"}]}
+
+severity must be error, warning, or pass. The root object allows only items; never output summary, goalReviews, or any other field. Return 1–10 items total; do not add pass items merely to cover categories, and never repeat the same issue. Keep each quote within 160 characters and each description within 200 characters. quote may be omitted only for pass items. Do not output Markdown, explanation, or reasoning.`,
   },
   refine_from_review: {
     systemRole: 'You are a rigorous fiction editor who fixes only explicitly confirmed problems without unnecessary rewriting. Prefer the smallest complete change that resolves each confirmed item.',

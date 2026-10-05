@@ -67,9 +67,26 @@ const RAW_AI_REVIEW_JSON = JSON.stringify({
   items: [{ category: '连续性', severity: 'error', description: '未经确认的原始问题。' }],
 })
 const PASSING_REVIEW_JSON = JSON.stringify({
-  summary: 'ok',
   items: [{ category: '剧情连贯性', severity: 'pass', description: '未发现矛盾' }],
 })
+const GOALS_REVIEW_JSON = JSON.stringify({ goalReviews: [] })
+
+/**
+ * 审稿分片路由：目标分片使用独立的 goalReviews 合同响应（不计入调用方
+ * 的 mock 记录），其余分片透传给原 mock（保留 Once 队列与调用日志）。
+ */
+function withGoalShardResponse(
+  completeWithLease: GenerationRuntimeEnvironment['completeWithLease'],
+  goalsResponse = GOALS_REVIEW_JSON,
+): GenerationRuntimeEnvironment['completeWithLease'] {
+  return async (request, ...rest) => {
+    // 目标分片按 purpose 路由（语言无关）；其余分片透传给原 mock
+    if (request.purpose?.startsWith('review-chapter-goals')) {
+      return { content: goalsResponse, finishReason: 'stop' as const }
+    }
+    return completeWithLease(request, ...rest)
+  }
+}
 
 function leaseReceipt(modelId = 'model-a'): ModelExecutionLeaseReceipt {
   return {
@@ -197,7 +214,7 @@ function chapterReviewCommand(
     draftContent,
     sourceDraft,
     chapterNumber,
-  }, runtimeDependencies(completeWithLease))
+  }, runtimeDependencies(withGoalShardResponse(completeWithLease)))
 }
 
 function successfulRevisionIpc(options: {
@@ -371,7 +388,12 @@ describe('RefineDraftCommand bounded visible completion', () => {
     const context = { ...workflowContext(), writingLanguage: 'en-US' as const }
     const commands = [
       command(completeWithLease, confirmedSource),
-      chapterReviewCommand(completeWithLease),
+      // 不经 withGoalShardResponse 包装，四条分片请求全部进入 observed 记录
+      new ReviewChapterCommand({
+        draftPath: 'vela://draft/1',
+        draftContent: confirmedSource,
+        chapterNumber: 1,
+      }, runtimeDependencies(completeWithLease)),
       reviewCommand(completeWithLease, confirmedSource, { confirmedReviewContent: confirmedContent }),
     ]
     for (const target of commands) {
@@ -379,7 +401,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
     }
 
     expect(observed.get('refine-draft')).toContain('Revise the chapter manuscript')
-    expect(observed.get('review-chapter')).toContain('Review the chapter for objective continuity')
+    expect(observed.get('review-chapter-continuity')).toContain("Review the chapter's factual thread")
+    expect(observed.get('review-chapter-goals')).toContain('chapter goal checklist')
     expect(observed.get('refine-from-review')).toContain('Revise the chapter using only the confirmed review checklist')
     for (const request of observed.values()) {
       expect(request).not.toContain('你是一位功力深厚的文学编辑')
@@ -1127,7 +1150,7 @@ describe('ReviewChapterCommand reasoning stage', () => {
     ].join('\n')
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
       .mockResolvedValueOnce({ content: '{"summary":"', finishReason: 'length' })
-      .mockResolvedValueOnce({ content: PASSING_REVIEW_JSON, finishReason: 'stop' })
+      .mockResolvedValue({ content: PASSING_REVIEW_JSON, finishReason: 'stop' })
     stubIpc(vi.fn(async (channel: string) => {
       if (channel === 'kb:search' || channel === 'db:character-get-all') return []
       if (channel === 'db:project-core-get') return {}
@@ -1142,7 +1165,8 @@ describe('ReviewChapterCommand reasoning stage', () => {
       step: {}, context: workflowContext(), callbacks: callbacks(),
     })
 
-    expect(completeWithLease).toHaveBeenCalledTimes(2)
+    // 事实线分片：截断初始请求 + 1 次完整续写；逻辑/叙事分片各 1 次（目标分片被路由拦截，不入 mock 记录）
+    expect(completeWithLease).toHaveBeenCalledTimes(4)
     const replacementRequest = completeWithLease.mock.calls[1]?.[0].messages
       .map(message => message.content).join('\n') ?? ''
     expect(replacementRequest).toContain('SOURCE_DRAFT_HEAD')
@@ -1273,7 +1297,6 @@ describe('ReviewChapterCommand reasoning stage', () => {
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
       .mockResolvedValue({
         content: JSON.stringify({
-          summary: 'AI review',
           items: [{ category: 'continuity', severity: 'pass', description: 'No conflict found.' }],
         }),
         finishReason: 'stop',
@@ -1300,7 +1323,7 @@ describe('ReviewChapterCommand reasoning stage', () => {
 
     await expect(chapterReviewCommand(completeWithLease).execute({
       step: {}, context: workflowContext(), callbacks: stepCallbacks,
-    })).resolves.toContain('AI review')
+    })).resolves.toContain('No conflict found.')
 
     expect(JSON.parse(createParams[0]!.content)).toMatchObject({
       summary: '审稿包含待核实项目，不能视为全部通过。',
@@ -1375,7 +1398,8 @@ describe('ReviewChapterCommand reasoning stage', () => {
       callbacks: callbacks(),
     })
 
-    expect(completeWithLease).toHaveBeenCalledOnce()
+    // 三个通用分片各一次（目标分片被路由拦截，不入 mock 记录）
+    expect(completeWithLease).toHaveBeenCalledTimes(3)
     expect(completeWithLease.mock.calls[0]?.[0].reasoningStage).toBe('review')
     expect(completeWithLease.mock.calls[0]?.[0].messages[1]?.content)
       .toContain('【补充写作 Skill：Review craft】')

@@ -35,7 +35,7 @@ export function freezeChapterGoals(chapterNumber: number, keyEvents: string | nu
 export function buildChapterGoalReviewPrompt(goals: FrozenChapterGoals, language: WritingLanguage): string {
   return writingLanguageText(language,
     `【本章目标逐项核对｜软件冻结清单】
-保留原有 summary 与 items 通用审稿格式，并在同一 JSON 根对象增加 goalReviews 数组（不受通用 items 的条数限制）。
+只输出一个 JSON 对象，根字段仅 goalReviews 数组（{"goalReviews":[...]}），不得输出 summary、items 或任何其他字段。
 按 id、evidence、description、status 顺序逐项返回 {"id":"原始id","evidence":[{"quote":"当前正文逐字引文"}],"description":"逐个列出目标原文中的每个当章子动作及其判断，再汇总","status":"completed|unmet|unknown"}，不得删项、改写目标或自创 id。
 依次判断：
 1. 先按原意区分当章行动与背景/未来约束；仅当目标要求达成约定时，本章达成约定即可，不要求提前执行。背景、purpose、未来计划不是已发生事实，也不自动变成到期行动。
@@ -46,7 +46,7 @@ export function buildChapterGoalReviewPrompt(goals: FrozenChapterGoals, language
 completed/unmet 都须当前正文逐字证据；unknown 可 evidence:[]。不拼接或改写引文，不引用计划证明行动；引文存在不证明推断成立。不检查字数或强求背景细节。
 冻结清单：${JSON.stringify(goals)}`,
     `[Current chapter goal checklist | software-frozen]
-Keep the existing summary/items review contract and add goalReviews to the same JSON root (not subject to the general items limit).
+Output exactly one JSON object whose root field is only the goalReviews array ({"goalReviews":[...]}); never output summary, items, or any other field.
 Return fields in id, evidence, description, status order: {"id":"original id","evidence":[{"quote":"verbatim current draft excerpt"}],"description":"list every current-chapter sub-action in the original goal with its judgment, then summarize","status":"completed|unmet|unknown"}. Do not delete/rewrite goals or invent IDs.
 Decide in order:
 1. Distinguish actions due now from background/future constraints. An agreement goal only requires the agreement, not early execution. Background, purpose and future plans are not established events or automatically due actions.
