@@ -21,7 +21,6 @@ const REQUIRED_CORE_KEYS = [
   'first_chapter_draft',
   'next_chapter_draft',
   'refine_chapter',
-  'consistency_check',
   'consistency_check_continuity',
   'consistency_check_logic',
   'consistency_check_narration',
