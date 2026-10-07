@@ -21,6 +21,22 @@ export interface ShardReviewItem {
 /** 审稿分片键；与 prompt-templates 的 consistency_check_* 模板键对应 */
 export type ReviewShardKey = 'continuity' | 'logic' | 'narration'
 
+/**
+ * 三个可开关的审稿分片：一个开关 = 一整片 LLM 调用。
+ * `emphasis` 是该分片覆盖的维度清单，注入模板的「重点检查」段落。
+ * 章节目标核对（D）由软件冻结清单驱动，恒跑，不在此列。
+ */
+export const REVIEW_SHARD_DIMENSIONS = [
+  { key: 'continuity', promptLabel: '事实线', emphasis: '剧情连贯性、前后章节串联、伏笔完整性' },
+  { key: 'logic', promptLabel: '因果与角色', emphasis: '剧情合理性、角色状态' },
+  { key: 'narration', promptLabel: '叙事规范', emphasis: '人称一致性、视角越权、时态滑动' },
+] as const satisfies readonly { key: ReviewShardKey; promptLabel: string; emphasis: string }[]
+
+/** 未显式指定时的默认分片集合：全查（程序化调用的兼容默认）。 */
+export function defaultReviewFocus(): ReviewShardKey[] {
+  return REVIEW_SHARD_DIMENSIONS.map(dimension => dimension.key)
+}
+
 /** 审稿报告的确定性行数上限：跨分片合并后整体截断 */
 export const MERGED_REVIEW_ITEMS_LIMIT = 16
 
@@ -31,31 +47,27 @@ const SHARD_QUOTE_MAX_CHARACTERS = 160
 const SEVERITY_RANK: Record<ReviewSeverity, number> = { error: 0, warning: 1, pass: 2 }
 
 /**
- * 把作者勾选的重点维度（join('、') 的字符串）路由到应执行的分片。
- * 空串 = 程序化调用默认全查。叙事规范分片没有开关，恒跑。
+ * 把作者勾选的分片键路由到应执行的分片。
+ * 空/未提供 = 程序化调用默认全查；提供则按集合精确取舍。
  */
-export function routeReviewShards(reviewFocus: string | undefined): {
-  continuity: boolean
-  logic: boolean
-} {
-  const focus = reviewFocus?.trim() ?? ''
-  if (!focus) return { continuity: true, logic: true }
+export function routeReviewShards(
+  reviewFocus: readonly ReviewShardKey[] | undefined,
+): Record<ReviewShardKey, boolean> {
+  const selected = reviewFocus && reviewFocus.length > 0 ? new Set(reviewFocus) : null
   return {
-    continuity: focus.includes('剧情连贯性') || focus.includes('前后章节串联'),
-    logic: focus.includes('剧情合理性') || focus.includes('角色状态'),
+    continuity: !selected || selected.has('continuity'),
+    logic: !selected || selected.has('logic'),
+    narration: !selected || selected.has('narration'),
   }
 }
 
-/** 取某分片名下被勾选的维度标签，作为该分片的「重点检查」强调文本 */
-export function shardReviewFocus(reviewFocus: string | undefined, shard: ReviewShardKey): string {
-  const focus = reviewFocus?.trim() ?? ''
-  if (!focus) return ''
-  const labelsByShard: Record<ReviewShardKey, string[]> = {
-    continuity: ['剧情连贯性', '前后章节串联'],
-    logic: ['剧情合理性', '角色状态'],
-    narration: [],
-  }
-  return labelsByShard[shard].filter(label => focus.includes(label)).join('、')
+/** 分片启用时返回其维度清单，作为该分片的「重点检查」强调文本；未启用返回空串。 */
+export function shardReviewFocus(
+  reviewFocus: readonly ReviewShardKey[] | undefined,
+  shard: ReviewShardKey,
+): string {
+  if (!routeReviewShards(reviewFocus)[shard]) return ''
+  return REVIEW_SHARD_DIMENSIONS.find(dimension => dimension.key === shard)?.emphasis ?? ''
 }
 
 function boundText(value: string, maxCharacters: number): string {

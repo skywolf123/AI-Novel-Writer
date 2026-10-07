@@ -38,22 +38,6 @@ export interface ReviewJSON {
 }
 
 /**
- * Canonical review dimensions. Prompt labels stay in the project writing
- * language; per-locale display copy belongs to the UI layer.
- */
-export const REVIEW_FOCUS_DIMENSIONS = [
-  { key: 'continuity', promptLabel: '剧情连贯性' },
-  { key: 'logic', promptLabel: '剧情合理性' },
-  { key: 'character', promptLabel: '角色状态' },
-  { key: 'foreshadow', promptLabel: '前后章节串联' },
-] as const
-
-/** The default focus string sent when the author touches no dimension toggle. */
-export function defaultReviewFocus(): string {
-  return REVIEW_FOCUS_DIMENSIONS.map(dimension => dimension.promptLabel).join('、')
-}
-
-/**
  * The checklist default shown before any author edit: general issues the model
  * flagged are included, chapter-goal rows and unverified items are not.
  * Chapter goals describe the blueprint the writer already followed, so an

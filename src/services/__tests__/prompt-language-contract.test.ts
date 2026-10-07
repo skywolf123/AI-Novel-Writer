@@ -24,7 +24,6 @@ const REQUIRED_CORE_KEYS = [
   'polish_chapter',
   'polish_spot_fix',
   'polish_gate',
-  'consistency_check',
   'consistency_check_continuity',
   'consistency_check_logic',
   'consistency_check_narration',

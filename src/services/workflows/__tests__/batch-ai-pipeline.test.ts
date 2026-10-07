@@ -6,7 +6,7 @@ import {
 } from '../batch-chapter-workflow'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorkflowStore, type WorkflowContext } from '../../../stores/workflow-store'
-import { defaultReviewFocus } from '../../../shared/review-report'
+import { defaultReviewFocus } from '../../../shared/review-shards'
 import { buildDefaultConfirmedReviewSnapshot } from '../../../shared/review-confirmation'
 
 const doubles = vi.hoisted(() => ({

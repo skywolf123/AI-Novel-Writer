@@ -30,9 +30,9 @@ import {
   parseShardReviewItems,
   routeReviewShards,
   shardReviewFocus,
-  synthesizeReviewSummary,
   type ReviewShardKey,
   type ShardReviewItem,
+  synthesizeReviewSummary,
 } from '../../../shared/review-shards'
 
 
@@ -41,8 +41,8 @@ export interface ReviewChapterParams {
   draftContent: string
   sourceDraft?: FrozenDraftSourceIdentity
   chapterNumber: number
-  /** 审稿维度侧重点（可选） */
-  reviewFocus?: string
+  /** 要执行的审稿分片键；省略 = 全查（程序化调用默认） */
+  reviewFocus?: ReviewShardKey[]
   /**
    * The manual editor opens the persisted report as a read-only tab. Headless
    * orchestrators read the report from the database and opt out so batch runs
@@ -355,7 +355,7 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       )
     }
 
-    {
+    if (routing.narration) {
       const builder = new ReviewPromptBuilder(narrationTemplate, writingLanguage)
         .withChapterContent(draft)
       shardPromises.push(

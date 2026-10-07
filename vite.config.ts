@@ -64,6 +64,7 @@ export default defineConfig({
     exclude: [
       ...configDefaults.exclude,
       '**/.worktrees/**',
+      '**/.claude/worktrees/**',
       '**/.pnpm-store/**',
       '**/.workbuddy/**',
       '**/.runtime/**',

@@ -8,6 +8,7 @@ import type { ProjectSessionContext, DraftWriteSource } from '../../shared/ipc-c
 import { sameProjectPathKey } from '../../shared/project-session-context'
 import { FINALIZATION_SHARED_WRITE_RESOURCE_KINDS } from '../../shared/workflow-resource-claims'
 import { normalizeChapterWordsTarget } from './chapter-creation-parameters'
+import type { ReviewShardKey } from '../../shared/review-shards'
 import { localize } from '../../i18n/core'
 import type { Locale } from '../../i18n/types'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -95,8 +96,8 @@ export interface ReviewOnlyParams {
   draftPath: string
   draftContent: string
   sourceDraft: FrozenDraftSourceIdentity
-  /** 审稿维度侧重点（可选） */
-  reviewFocus?: string
+  /** 要执行的审稿分片键（可选；省略 = 全查） */
+  reviewFocus?: ReviewShardKey[]
 }
 
 export interface FinalizeOnlyParams {

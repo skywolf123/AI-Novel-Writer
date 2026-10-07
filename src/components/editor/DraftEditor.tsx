@@ -27,7 +27,7 @@ import { retryFinalizationPublication } from '../../services/finalization-client
 import { captureFinalizationSnapshot } from '../../services/finalization-snapshot'
 
 import { DRAFT_STATUS_LABEL, DRAFT_STATUS_COLOR } from '../../shared/draft-status'
-import { REVIEW_FOCUS_DIMENSIONS } from '../../shared/review-report'
+import { REVIEW_SHARD_DIMENSIONS } from '../../shared/review-shards'
 import { countDraftUnits } from '../../shared/draft-units'
 import { PostProcessStatusPanel } from '../ui/PostProcessStatusPanel'
 import { getChapterFinalizeScope } from '../../services/workflows/workflow-utils'
@@ -146,27 +146,23 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const [confirmAction, setConfirmAction] = useState<'refine' | 'review' | 'polish' | null>(null)
   const [userRefinePrompt, setUserRefinePrompt] = useState('')
   const [userPolishPrompt, setUserPolishPrompt] = useState('')
-  // 审稿维度多选：维度集合与 promptLabel 与无头批量流水共用同一份定义，
-  // 只有界面文案留在组件内。
+  // 审稿分片开关：一个勾选 = 一整片 LLM 调用（事实线 / 因果与角色 / 叙事规范）。
+  // 维度集合来自共享定义，界面文案留在组件内。
   const REVIEW_DIM_COPY: Record<string, { label: string; desc: string }> = {
     continuity: {
-      label: text('剧情连贯性', 'Story continuity'),
-      desc: text('与前文是否矛盾', 'Consistency with earlier chapters'),
+      label: text('事实线', 'Factual thread'),
+      desc: text('剧情连贯、前后串联、伏笔完整', 'Plot continuity, chapter connections, foreshadowing'),
     },
     logic: {
-      label: text('剧情合理性', 'Story logic'),
-      desc: text('因果逻辑、动机、常识', 'Causality, motivation, and plausibility'),
+      label: text('因果与角色', 'Causality & character'),
+      desc: text('剧情合理性、角色状态', 'Causality, motivation, and character state'),
     },
-    character: {
-      label: text('角色状态', 'Character state'),
-      desc: text('能力/位置/情感一致性', 'Ability, location, and emotional consistency'),
-    },
-    foreshadow: {
-      label: text('前后章节串联', 'Chapter connections'),
-      desc: text('伏笔、悬念连贯', 'Foreshadowing and suspense continuity'),
+    narration: {
+      label: text('叙事规范', 'Narrative conventions'),
+      desc: text('人称、视角、时态', 'Person, viewpoint, and tense'),
     },
   }
-  const REVIEW_DIMS = REVIEW_FOCUS_DIMENSIONS.map(dimension => ({
+  const REVIEW_DIMS = REVIEW_SHARD_DIMENSIONS.map(dimension => ({
     ...dimension,
     ...(REVIEW_DIM_COPY[dimension.key] ?? { label: dimension.key, desc: '' }),
   }))
@@ -371,7 +367,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         draftPath: filePath,
         draftContent: source.body,
         sourceDraft: source.sourceDraft,
-        reviewFocus: REVIEW_DIMS.filter(d => reviewDims[d.key]).map(d => d.promptLabel).join('、') || undefined,
+        reviewFocus: REVIEW_DIMS.filter(d => reviewDims[d.key]).map(d => d.key),
       }, projectSession), false)
     } catch (e) {
       if (!isProjectSessionCurrent(projectSession)) return
@@ -929,14 +925,14 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               </>
             ) : (
               <>
-                <div>{text('将调用 AI 对本章草稿进行一致性检查，并生成审稿报告。', 'AI will check this chapter for consistency and generate a review report.')}</div>
+                <div>{text('将调用 AI 对本章草稿进行审查，并生成审稿报告。', 'AI will review this chapter and generate a review report.')}</div>
                 <div className="mt-3">
-                  <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text)' }}>{text('重点检查维度：', 'Review focus:')}</div>
+                  <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text)' }}>{text('审稿分片：', 'Review shards:')}</div>
                   <div className="flex flex-wrap gap-2">
                     {REVIEW_DIMS.map(d => (
                       <label
                         key={d.key}
-                        className="flex items-center gap-1.5 cursor-pointer select-none px-2 py-1 rounded-md text-xs"
+                        className="flex items-start gap-1.5 cursor-pointer select-none px-2 py-1.5 rounded-md text-xs"
                         style={{
                           border: `1px solid ${reviewDims[d.key] ? 'var(--color-accent)' : 'var(--color-border)'}`,
                           backgroundColor: reviewDims[d.key] ? 'rgba(var(--color-accent-rgb),0.1)' : 'transparent',
@@ -945,7 +941,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                         onClick={() => setReviewDims(prev => ({ ...prev, [d.key]: !prev[d.key] }))}
                       >
                         <div
-                          className="w-3 h-3 rounded flex items-center justify-center flex-shrink-0"
+                          className="w-3 h-3 mt-0.5 rounded flex items-center justify-center flex-shrink-0"
                           style={{
                             backgroundColor: reviewDims[d.key] ? 'var(--color-accent)' : 'transparent',
                             border: `1.5px solid ${reviewDims[d.key] ? 'var(--color-accent)' : 'var(--color-border)'}`,
@@ -955,9 +951,17 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                             <Check size={9} strokeWidth={3} color="white" aria-hidden="true" />
                           )}
                         </div>
-                        {d.label}
+                        <span className="flex flex-col leading-tight">
+                          <span>{d.label}</span>
+                          {d.desc && (
+                            <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>{d.desc}</span>
+                          )}
+                        </span>
                       </label>
                     ))}
+                  </div>
+                  <div className="text-[10px] mt-2" style={{ color: 'var(--color-text-muted)' }}>
+                    {text('章节目标核对：始终执行', 'Chapter goal checklist: always runs')}
                   </div>
                 </div>
               </>

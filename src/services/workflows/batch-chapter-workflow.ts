@@ -17,7 +17,7 @@ import type { FinalizationSnapshot } from '../finalization-snapshot'
 import { FINALIZATION_SHARED_WRITE_RESOURCE_KINDS } from '../../shared/workflow-resource-claims'
 import { requireWorkflowProjectSession } from './workflow-project-session'
 import { normalizeChapterWordsTarget } from './chapter-creation-parameters'
-import { defaultReviewFocus } from '../../shared/review-report'
+import { defaultReviewFocus } from '../../shared/review-shards'
 import { buildDefaultConfirmedReviewSnapshot, defaultSnapshotHasWork } from '../../shared/review-confirmation'
 import { requireIpcSuccess } from '../ipc-result'
 

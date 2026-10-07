@@ -333,7 +333,7 @@ describe('project custom prompt session ownership', () => {
       'en-US',
     )).toBe('Knowledge-base search results')
     expect(getPromptVariableDescription(
-      BUILTIN_PROMPTS.find((template) => template.key === 'consistency_check')!,
+      BUILTIN_PROMPTS.find((template) => template.key === 'consistency_check_continuity')!,
       'review_focus',
       'en-US',
     )).toBe('Review areas requested by the author (optional)')

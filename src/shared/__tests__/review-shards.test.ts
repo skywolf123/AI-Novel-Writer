@@ -9,28 +9,34 @@ import {
 } from '../review-shards'
 
 describe('routeReviewShards', () => {
-  it('runs all shards for an empty focus (programmatic default)', () => {
-    expect(routeReviewShards(undefined)).toEqual({ continuity: true, logic: true })
-    expect(routeReviewShards('')).toEqual({ continuity: true, logic: true })
+  it('runs every shard when no selection is provided (programmatic default)', () => {
+    expect(routeReviewShards(undefined)).toEqual({ continuity: true, logic: true, narration: true })
+    expect(routeReviewShards([])).toEqual({ continuity: true, logic: true, narration: true })
   })
 
-  it('routes the author-checked dimensions to their shards', () => {
-    expect(routeReviewShards('剧情连贯性、剧情合理性、角色状态、前后章节串联')).toEqual({
+  it('runs exactly the selected shards', () => {
+    expect(routeReviewShards(['continuity', 'narration'])).toEqual({
       continuity: true,
-      logic: true,
+      logic: false,
+      narration: true,
     })
-    expect(routeReviewShards('剧情连贯性、前后章节串联')).toEqual({ continuity: true, logic: false })
-    expect(routeReviewShards('剧情合理性、角色状态')).toEqual({ continuity: false, logic: true })
+    expect(routeReviewShards(['logic'])).toEqual({ continuity: false, logic: true, narration: false })
   })
 })
 
 describe('shardReviewFocus', () => {
-  it('keeps only the labels belonging to the shard', () => {
-    expect(shardReviewFocus('剧情连贯性、剧情合理性、角色状态、前后章节串联', 'continuity'))
-      .toBe('剧情连贯性、前后章节串联')
-    expect(shardReviewFocus('剧情连贯性、剧情合理性、角色状态、前后章节串联', 'logic'))
+  it('returns the shard emphasis only when the shard is enabled', () => {
+    expect(shardReviewFocus(['continuity', 'logic', 'narration'], 'continuity'))
+      .toBe('剧情连贯性、前后章节串联、伏笔完整性')
+    expect(shardReviewFocus(['continuity', 'logic', 'narration'], 'logic'))
       .toBe('剧情合理性、角色状态')
-    expect(shardReviewFocus('剧情连贯性', 'narration')).toBe('')
+    expect(shardReviewFocus(['continuity', 'logic', 'narration'], 'narration'))
+      .toBe('人称一致性、视角越权、时态滑动')
+  })
+
+  it('returns an empty emphasis for a shard the author turned off', () => {
+    expect(shardReviewFocus(['continuity'], 'logic')).toBe('')
+    expect(shardReviewFocus(['continuity'], 'narration')).toBe('')
   })
 })
 
