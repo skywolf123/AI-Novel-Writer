@@ -184,6 +184,7 @@ describe('draft-store merged revision persistence', () => {
       'draft-11',
       { content: '原稿', contentRevision: 3 },
       '合并正文',
+      'revised',
     )
   })
 })

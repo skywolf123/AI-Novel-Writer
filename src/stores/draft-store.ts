@@ -392,7 +392,11 @@ export const useDraftStore = create<DraftState>()((set, get) => ({
       if (!isDraftProjectSessionCurrent(projectSession)) return staleProjectError()
 
       if (targetTab && editorSnapshot) {
-        editorState.settleMergedRevision(targetTab.id, editorSnapshot, mergedText)
+        // db:revision-merge committed `status = 'revised'` on the draft row in
+        // the same transaction; keep the open tab's status in step with it, or
+        // the next AI freeze captures the stale status and the source guard
+        // rejects the follow-up action.
+        editorState.settleMergedRevision(targetTab.id, editorSnapshot, mergedText, 'revised')
       }
 
       if (chapterNumber !== undefined) {
