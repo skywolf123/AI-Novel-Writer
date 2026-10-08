@@ -71,12 +71,15 @@ describe('editor tab save settlement', () => {
     useEditorStore.getState().settleMergedRevision('draft-a', {
       content: tabAtMergeStart.content ?? '',
       contentRevision: tabAtMergeStart.contentRevision ?? 0,
-    }, '人工确认后的合并正文')
+    }, '人工确认后的合并正文', 'revised')
 
     expect(useEditorStore.getState().tabs[0]).toMatchObject({
       content: '人工确认后的合并正文',
       savedContent: '人工确认后的合并正文',
       contentRevision: 4,
+      // 合并把库里的草稿行置为 revised；标签页状态必须同步，否则下一次
+      // AI 冻结源稿会带上陈旧状态，被源稿守卫拒绝。
+      draftStatus: 'revised',
       dirty: false,
     })
   })
@@ -93,12 +96,15 @@ describe('editor tab save settlement', () => {
       'draft-a',
       snapshot,
       '人工确认后的合并正文',
+      'revised',
     )
 
     expect(useEditorStore.getState().tabs[0]).toMatchObject({
       content: '提交等待期间继续输入 C',
       savedContent: '人工确认后的合并正文',
       contentRevision: 4,
+      // 即便提交等待期间有新输入，库里的草稿行仍是 revised。
+      draftStatus: 'revised',
       dirty: true,
     })
   })

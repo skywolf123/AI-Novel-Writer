@@ -104,11 +104,12 @@ interface EditorState {
   markTabSaved: (tabId: string, savedContent?: string) => void
   /** 按保存开始时的快照结算；期间有新输入时只更新已保存基准。 */
   settleTabSave: (tabId: string, snapshot: EditorTabSaveSnapshot) => void
-  /** 结算修订合并；期间有新输入时保留当前正文与未保存状态。 */
+  /** 结算修订合并；期间有新输入时保留当前正文与未保存状态。合并会把草稿置为 revised，标签页状态必须同步。 */
   settleMergedRevision: (
     tabId: string,
     snapshot: EditorTabSaveSnapshot,
     mergedContent: string,
+    mergedStatus?: DraftStatus,
   ) => void
   /** 清空所有 Tab */
   clearTabs: () => void
@@ -364,7 +365,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     }))
   },
 
-  settleMergedRevision: (tabId, snapshot, mergedContent) => {
+  settleMergedRevision: (tabId, snapshot, mergedContent, mergedStatus) => {
     set((state) => ({
       tabs: state.tabs.map(tab => {
         if (tab.id !== tabId) return tab
@@ -376,6 +377,10 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
           return {
             ...tab,
             savedContent: mergedContent,
+            // The draft row in the database is already `mergedStatus`; the tab
+            // must agree with it or the next AI freeze will capture a stale
+            // status and the source guard will reject the follow-up action.
+            ...(mergedStatus ? { draftStatus: mergedStatus } : {}),
             dirty: true,
           }
         }
@@ -384,6 +389,7 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
           content: mergedContent,
           savedContent: mergedContent,
           contentRevision: (tab.contentRevision ?? 0) + (tab.content === mergedContent ? 0 : 1),
+          ...(mergedStatus ? { draftStatus: mergedStatus } : {}),
           dirty: false,
         }
       }),
