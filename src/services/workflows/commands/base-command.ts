@@ -137,25 +137,20 @@ export const POLISH_FLOW_CONTINUATION_LIMITS = Object.freeze({
 /**
  * Intent cost ceilings are product policy, never model profiles. The runtime
  * still plans every physical request from the frozen lease capability receipt.
- *
- * `maxRequestedOutputTokensPerAttempt` here is the product ceiling for one
- * physical request, not the request size. The harness narrows it further to
- * the selected model's own declared output limit before planning, so a model
- * that can answer 32768 tokens is asked for 32768 instead of a stale 8192.
  */
 export const WORKFLOW_GENERATION_BUDGETS = Object.freeze({
   structured: Object.freeze({
     maxAttempts: 16,
     maxRequestedOutputTokens: 131_072,
     maxRequestedOutputTokensPerAttempt:
-      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
+      8192,
     deadlineMs: 10 * 60_000,
   }),
   text: Object.freeze({
     maxAttempts: 8,
     maxRequestedOutputTokens: 65_536,
     maxRequestedOutputTokensPerAttempt:
-      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
+      8192,
     deadlineMs: 20 * 60_000,
   }),
   'character-architecture': Object.freeze({
@@ -164,7 +159,7 @@ export const WORKFLOW_GENERATION_BUDGETS = Object.freeze({
     maxAttempts: 12,
     maxRequestedOutputTokens: 98_304,
     maxRequestedOutputTokensPerAttempt:
-      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
+      8192,
     deadlineMs: 20 * 60_000,
   }),
   polish: Object.freeze({
