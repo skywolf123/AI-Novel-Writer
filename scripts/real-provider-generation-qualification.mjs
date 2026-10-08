@@ -66,6 +66,14 @@ const QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES = Object.freeze({
   'gemini-2.5-flash-lite': 65_536,
 })
 
+function declaredFrozenOutputCapabilityTokens(modelName) {
+  const tokens = QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[modelName]
+  if (!Number.isSafeInteger(tokens) || tokens < 1) {
+    throw new QualificationFailure(`FROZEN_PROFILE_OUTPUT_CAPABILITY_MISSING:${modelName}`)
+  }
+  return tokens
+}
+
 function declaredOutputCapabilityTokens(profile) {
   const candidates = [profile?.capabilities?.maxOutputTokens, profile?.maxTokens]
   for (const value of candidates) {
@@ -73,6 +81,7 @@ function declaredOutputCapabilityTokens(profile) {
   }
   return null
 }
+
 
 export const QUALIFICATION_PRICE_SNAPSHOTS = Object.freeze([
   Object.freeze({
@@ -387,10 +396,10 @@ export function createQualificationProfilesFromMemory({
     protocol: grokTarget.protocol,
     modelName: grokTarget.modelName,
     baseUrl: grokTarget.baseUrl,
-    maxTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[grokTarget.modelName],
+    maxTokens: declaredFrozenOutputCapabilityTokens(grokTarget.modelName),
     capabilities: {
       contextWindowTokens: null,
-      maxOutputTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[grokTarget.modelName],
+      maxOutputTokens: declaredFrozenOutputCapabilityTokens(grokTarget.modelName),
     },
     qualificationPriceSnapshot: QUALIFICATION_PRICE_SNAPSHOTS[1],
   }
@@ -403,10 +412,10 @@ export function createQualificationProfilesFromMemory({
     apiKey: String(geminiApiKey || '').trim(),
     baseUrl: geminiTarget.baseUrl,
     temperature: 0.6,
-    maxTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[geminiTarget.modelName],
+    maxTokens: declaredFrozenOutputCapabilityTokens(geminiTarget.modelName),
     capabilities: {
       contextWindowTokens: null,
-      maxOutputTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[geminiTarget.modelName],
+      maxOutputTokens: declaredFrozenOutputCapabilityTokens(geminiTarget.modelName),
       reasoning: true,
       structuredOutput: true,
       usage: true,

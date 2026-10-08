@@ -311,9 +311,9 @@ export abstract class BaseWorkflowCommand<TResult = string> {
       uiLocale: context.uiLocale ?? 'zh-CN',
       promptBudget: {
         contextWindowTokens: completion.receipt.capabilities.contextWindowTokens,
-        // The continuation prompt is sized against the generation space the
-        // model was actually given for the previous attempt — its declared
-        // output capability, not an application token ledger.
+        // Continuation sizing reserves the model's declared output capability.
+        // The harness may grant less after context clamping, so this is the
+        // conservative bound — never a token ledger read back from a receipt.
         maxOutputTokens: completion.receipt.capabilities.maxOutputTokens,
         systemPromptChars: systemPrompt.length,
       },

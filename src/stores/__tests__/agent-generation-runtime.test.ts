@@ -90,8 +90,6 @@ describe('Agent GenerationRuntime boundary', () => {
               complete,
               budget: {
                 maxAttempts: AGENT_GENERATION_BUDGET.maxAttempts,
-                // The harness ignores token-quantity fields; they are supplied
-                // only because the session budget shape still declares them.
                 deadlineAt: Date.now() + AGENT_GENERATION_BUDGET.deadlineMs,
               },
             },

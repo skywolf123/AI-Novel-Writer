@@ -221,6 +221,25 @@ describe('GenerationHarness', () => {
     }))
   })
 
+  it('fails closed instead of inventing an output capability when the profile declares none', () => {
+    const complete = vi.fn<CompletionPort['complete']>()
+    const harness = createGenerationHarness({
+      modelSource: {
+        snapshotDefaultModel: () => ({
+          revision: 'capability-less-profile',
+          model: model({ maxTokens: undefined }),
+        }),
+      },
+      completionPort: { complete },
+      policy: { maxAttempts: 1, deadlineMs: 60_000 },
+    })
+
+    expect(() => harness.openSession()).toThrow(expect.objectContaining({
+      code: 'UNTRUSTED_CAPABILITY_EVIDENCE',
+    }))
+    expect(complete).not.toHaveBeenCalled()
+  })
+
   it('gives the model its declared output capability and never truncates it to an application cap', async () => {
     const complete = vi.fn<CompletionPort['complete']>()
       .mockResolvedValueOnce({ content: 'first batch', finishReason: 'length' })

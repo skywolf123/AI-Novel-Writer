@@ -450,17 +450,26 @@ function endpointFingerprint(model: GenerationModelDescriptor): string {
 }
 
 function resolveInitialCapabilities(model: Readonly<GenerationModelDescriptor>): ResolvedCapabilityEvidence {
+  // No lease evidence reaches this fallback, so the profile's own declaration is
+  // the only admissible source. When it is absent there is nothing to derive:
+  // the lease layer rejects that case as INVALID_OUTPUT_CAPABILITY, and this
+  // seam must not invent a default generation space either.
   const legacyMaxOutputTokens = positiveInteger(model.maxTokens)
-  const maxOutputTokens = legacyMaxOutputTokens ?? 1
+  if (legacyMaxOutputTokens === null) {
+    throw new GenerationHarnessError(
+      'UNTRUSTED_CAPABILITY_EVIDENCE',
+      '模型档案未声明有效的输出能力，且缺少主进程租约证据。',
+    )
+  }
   return {
     contextWindowTokens: null,
-    maxOutputTokens,
+    maxOutputTokens: legacyMaxOutputTokens,
     reasoning: null,
     structuredOutput: null,
     usage: null,
     source: {
       contextWindowTokens: 'unknown',
-      maxOutputTokens: legacyMaxOutputTokens ? 'legacy-profile' : 'unknown',
+      maxOutputTokens: 'legacy-profile',
       featureFlags: 'unknown',
     },
   }
@@ -568,7 +577,7 @@ export function createGenerationHarness(dependencies: {
           // actually left after the prompt. No product-level per-request cap
           // applies anymore, so a long-reasoning model is never truncated by a
           // value the application invented.
-          const safeReservedOutputTokens = Math.min(
+          const grantedOutputTokens = Math.min(
             capabilities.maxOutputTokens,
             Math.max(0, contextAvailableOutputTokens ?? capabilities.maxOutputTokens),
           )
@@ -597,7 +606,7 @@ export function createGenerationHarness(dependencies: {
             )
           }
 
-          const maxOutputTokens = safeReservedOutputTokens
+          const maxOutputTokens = grantedOutputTokens
           const promptBudget = promptBudgetCandidate
           if (promptBudget) {
             logPromptBudgetReport(promptBudget)

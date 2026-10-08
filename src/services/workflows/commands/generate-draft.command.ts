@@ -339,9 +339,9 @@ function logDraftAttempt(
   callbacks.log(workflowUiText(
     context,
     `  ${phase.zhCN}：第 ${receipt.budget.attempt}/${receipt.budget.maxAttempts} 次请求`
-      + `（本次允许输出 ${receipt.capabilities.maxOutputTokens} Tokens）`,
+      + `（模型声明输出能力 ${receipt.capabilities.maxOutputTokens} Tokens）`,
     `  ${phase.enUS}: request ${receipt.budget.attempt}/${receipt.budget.maxAttempts} `
-      + `(up to ${receipt.capabilities.maxOutputTokens} output tokens allowed)`,
+      + `(model declares ${receipt.capabilities.maxOutputTokens} output tokens)`,
   ))
 }
 
