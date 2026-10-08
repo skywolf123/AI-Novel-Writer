@@ -45,10 +45,6 @@ function completed(content: string, attempt: number) {
       budget: {
         attempt,
         maxAttempts: 8,
-        requestedOutputTokens: 2048,
-        cumulativeRequestedOutputTokens: attempt * 2048,
-        maxRequestedOutputTokens: 65_536,
-        maxRequestedOutputTokensPerAttempt: 8192,
         deadlineAt: Date.now() + 60_000,
       },
       finishReason: 'stop' as const,
@@ -94,8 +90,8 @@ describe('Agent GenerationRuntime boundary', () => {
               complete,
               budget: {
                 maxAttempts: AGENT_GENERATION_BUDGET.maxAttempts,
-                maxRequestedOutputTokens: AGENT_GENERATION_BUDGET.maxRequestedOutputTokens,
-                maxRequestedOutputTokensPerAttempt: AGENT_GENERATION_BUDGET.maxRequestedOutputTokensPerAttempt,
+                // The harness ignores token-quantity fields; they are supplied
+                // only because the session budget shape still declares them.
                 deadlineAt: Date.now() + AGENT_GENERATION_BUDGET.deadlineMs,
               },
             },
@@ -159,8 +155,6 @@ describe('Agent GenerationRuntime boundary', () => {
           complete,
           budget: {
             maxAttempts: AGENT_GENERATION_BUDGET.maxAttempts,
-            maxRequestedOutputTokens: AGENT_GENERATION_BUDGET.maxRequestedOutputTokens,
-            maxRequestedOutputTokensPerAttempt: AGENT_GENERATION_BUDGET.maxRequestedOutputTokensPerAttempt,
             deadlineAt: Date.now() + AGENT_GENERATION_BUDGET.deadlineMs,
           },
         },
@@ -224,8 +218,6 @@ describe('Agent GenerationRuntime boundary', () => {
           complete,
           budget: {
             maxAttempts: AGENT_GENERATION_BUDGET.maxAttempts,
-            maxRequestedOutputTokens: AGENT_GENERATION_BUDGET.maxRequestedOutputTokens,
-            maxRequestedOutputTokensPerAttempt: AGENT_GENERATION_BUDGET.maxRequestedOutputTokensPerAttempt,
             deadlineAt: Date.now() + AGENT_GENERATION_BUDGET.deadlineMs,
           },
         },

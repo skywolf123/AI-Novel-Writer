@@ -597,7 +597,6 @@ describe('InferGlobalSettingsCommand', () => {
       'limitUtf8Bytes',
       'contextWindowTokens',
       'estimatedInputTokens',
-      'reservedOutputTokens',
       'sections',
       'modelId',
       'errorCode',

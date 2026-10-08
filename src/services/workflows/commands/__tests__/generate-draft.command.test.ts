@@ -189,7 +189,6 @@ function attemptReceipt(
   attempt = 1,
   reasoning = false,
 ): GenerationAttemptReceipt {
-  const requestedOutputTokens = 4096
   return {
     model: {
       id: 'frozen-model',
@@ -211,10 +210,6 @@ function attemptReceipt(
     budget: {
       attempt,
       maxAttempts: DRAFT_GENERATION_BUDGET.maxAttempts,
-      requestedOutputTokens,
-      cumulativeRequestedOutputTokens: attempt * requestedOutputTokens,
-      maxRequestedOutputTokens: DRAFT_GENERATION_BUDGET.maxRequestedOutputTokens,
-      maxRequestedOutputTokensPerAttempt: DRAFT_GENERATION_BUDGET.maxRequestedOutputTokensPerAttempt,
       deadlineAt: Date.now() + DRAFT_GENERATION_BUDGET.deadlineMs,
     },
     finishReason,
@@ -249,8 +244,6 @@ function fakeRuntime(
     session: {
       budget: {
         maxAttempts: DRAFT_GENERATION_BUDGET.maxAttempts,
-        maxRequestedOutputTokens: DRAFT_GENERATION_BUDGET.maxRequestedOutputTokens,
-        maxRequestedOutputTokensPerAttempt: DRAFT_GENERATION_BUDGET.maxRequestedOutputTokensPerAttempt,
         deadlineAt: Date.now() + DRAFT_GENERATION_BUDGET.deadlineMs,
       },
       complete,
@@ -905,10 +898,11 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
       'draft-lease-a',
       'draft-lease-a',
     ])
-    expect(completeWithLease.mock.calls.map(([request]) => request.plan.maxOutputTokens)).toEqual([
-      8192,
-      8192,
-    ])
+    // max_tokens comes from the frozen lease capability (384K), narrowed only by
+    // the context actually left after each prompt — never a product per-attempt cap.
+    const requestedOutputTokens = completeWithLease.mock.calls.map(([request]) => request.plan.maxOutputTokens)
+    expect(requestedOutputTokens).toHaveLength(2)
+    expect(requestedOutputTokens.every(tokens => tokens > 100_000)).toBe(true)
     expect(createRuntime).toHaveBeenCalledWith({ budget: DRAFT_GENERATION_BUDGET })
     expect(invoke).toHaveBeenCalledWith(
       'db:draft-create',

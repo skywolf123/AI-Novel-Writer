@@ -85,7 +85,6 @@ function taskPayload(task: GenerationTask): AttemptRequest {
 function attemptReceipt(
   attempt: number,
   requestedTokens: number,
-  cumulativeRequestedTokens: number,
   finishReason: GenerationAttemptReceipt['finishReason'],
 ): GenerationAttemptReceipt {
   return {
@@ -109,10 +108,6 @@ function attemptReceipt(
     budget: {
       attempt,
       maxAttempts: 20,
-      requestedOutputTokens: requestedTokens,
-      cumulativeRequestedOutputTokens: cumulativeRequestedTokens,
-      maxRequestedOutputTokens: 10_000,
-      maxRequestedOutputTokensPerAttempt: requestedTokens,
       deadlineAt: 10_000,
     },
     finishReason,
@@ -121,13 +116,11 @@ function attemptReceipt(
 
 function createSession(handler: AttemptHandler): Pick<GenerationSession, 'complete'> {
   let attempts = 0
-  let cumulativeRequestedTokens = 0
 
   return {
     async complete(task) {
       attempts += 1
       const attempt = await handler(taskPayload(task))
-      cumulativeRequestedTokens += attempt.requestedTokens
       if (attempt.status === 'failed') {
         throw new GenerationAttemptError(
           'PROVIDER_REQUEST_FAILED',
@@ -135,7 +128,6 @@ function createSession(handler: AttemptHandler): Pick<GenerationSession, 'comple
           attemptReceipt(
             attempts,
             attempt.requestedTokens,
-            cumulativeRequestedTokens,
             'error',
           ),
         )
@@ -153,7 +145,6 @@ function createSession(handler: AttemptHandler): Pick<GenerationSession, 'comple
           receipt: attemptReceipt(
             attempts,
             attempt.requestedTokens,
-            cumulativeRequestedTokens,
             finishReason,
           ),
         }
@@ -165,7 +156,6 @@ function createSession(handler: AttemptHandler): Pick<GenerationSession, 'comple
         receipt: attemptReceipt(
           attempts,
           attempt.requestedTokens,
-          cumulativeRequestedTokens,
           'stop',
         ),
       }
@@ -187,7 +177,6 @@ describe('StructuredBatchExecutor seam', () => {
     const promptBudgetError = new PromptBudgetExceededError({
       totalUtf8Bytes: 17_000,
       limitUtf8Bytes: 16_384,
-      reservedOutputTokens: 4096,
       sections: [{ sectionName: 'global-guidance', utf8Bytes: 16_500 }],
       modelId: 'test-model',
       errorCode: 'PROMPT_BUDGET_EXHAUSTED',
@@ -261,7 +250,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: Array.from({ length: 11 }, (_, index) => ({ chapterNumber: index + 1 })),
-      receipt: { calls: 20, requestedTokens: 81_920 },
+      receipt: { calls: 20 },
     })
     expect(physicalComplete).toHaveBeenCalledTimes(20)
   })
@@ -292,8 +281,6 @@ describe('StructuredBatchExecutor seam', () => {
       completionPort: { complete: physicalComplete },
       policy: {
         maxAttempts: 2,
-        maxRequestedOutputTokens: 200,
-        maxRequestedOutputTokensPerAttempt: 100,
         deadlineMs: 60_000,
       },
       now: () => 0,
@@ -311,7 +298,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'limit_exceeded', reason: 'max_calls' },
-      receipt: { calls: 2, requestedTokens: 200 },
+      receipt: { calls: 2 },
     })
     expect(physicalComplete).toHaveBeenCalledTimes(2)
   })
@@ -378,7 +365,7 @@ describe('StructuredBatchExecutor seam', () => {
       expect(result).toMatchObject({
         ok: false,
         failure: { code: 'limit_exceeded', reason: 'invalid_limit' },
-        receipt: { calls: 0, requestedTokens: 0 },
+        receipt: { calls: 0 },
       })
       expect(generate).not.toHaveBeenCalled()
     },
@@ -429,11 +416,10 @@ describe('StructuredBatchExecutor seam', () => {
       receipt: {
         calls: 3,
         splitCount: 1,
-        requestedTokens: 300,
         attempts: [
-          { finishReason: 'length', budget: { attempt: 1, requestedOutputTokens: 100 } },
-          { finishReason: 'stop', budget: { attempt: 2, requestedOutputTokens: 100 } },
-          { finishReason: 'stop', budget: { attempt: 3, requestedOutputTokens: 100 } },
+          { finishReason: 'length', budget: { attempt: 1 } },
+          { finishReason: 'stop', budget: { attempt: 2 } },
+          { finishReason: 'stop', budget: { attempt: 3 } },
         ],
       },
     })
@@ -476,7 +462,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'generation_failed', reason: 'server_error' },
-      receipt: { calls: 5, splitCount: 1, requestedTokens: 500, providerRetryCount: 2 },
+      receipt: { calls: 5, splitCount: 1, providerRetryCount: 2 },
     })
     expect(result).not.toHaveProperty('items')
   })
@@ -624,7 +610,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'invalid_output', reason: 'invalid_item' },
-      receipt: { calls: 1, requestedTokens: 100 },
+      receipt: { calls: 1 },
     })
     expect(result).not.toHaveProperty('items')
   })
@@ -640,7 +626,7 @@ describe('StructuredBatchExecutor seam', () => {
             status: 'completed',
             content: '{"blueprints":[',
             finishReason: 'stop',
-            receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+            receipt: attemptReceipt(attempt, 100, 'stop'),
           }
         }),
       },
@@ -654,7 +640,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'invalid_output', reason: 'malformed_output' },
-      receipt: { calls: 2, requestedTokens: 200 },
+      receipt: { calls: 2 },
     })
     expect(result).not.toHaveProperty('items')
   })
@@ -666,7 +652,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":1,"title":"第1章"}',
           finishReason: 'stop',
-          receipt: attemptReceipt(1, 100, 100, 'stop'),
+          receipt: attemptReceipt(1, 100, 'stop'),
         }
       }
       expect(task).toMatchObject({
@@ -687,7 +673,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: blueprintJson([1]),
         finishReason: 'stop',
-        receipt: attemptReceipt(2, 100, 200, 'stop'),
+        receipt: attemptReceipt(2, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({
@@ -705,7 +691,6 @@ describe('StructuredBatchExecutor seam', () => {
       items: [{ chapterNumber: 1, title: '第1章' }],
       receipt: {
         calls: 2,
-        requestedTokens: 200,
         attempts: [
           { finishReason: 'stop', budget: { attempt: 1 } },
           { finishReason: 'stop', budget: { attempt: 2 } },
@@ -723,7 +708,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: malformedCandidate,
           finishReason: 'stop',
-          receipt: attemptReceipt(1, 100, 100, 'stop'),
+          receipt: attemptReceipt(1, 100, 'stop'),
         }
       }
 
@@ -737,7 +722,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: '{"blueprints":[{"chapterNumber":1,"title":"café 航站楼"}]}',
         finishReason: 'stop',
-        receipt: attemptReceipt(2, 100, 200, 'stop'),
+        receipt: attemptReceipt(2, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({
@@ -766,7 +751,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: `{"blueprints":[{"chapterNumber":1,"title":"第1章 ${injected}"}`,
           finishReason: 'stop',
-          receipt: attemptReceipt(1, 100, 100, 'stop'),
+          receipt: attemptReceipt(1, 100, 'stop'),
         }
       }
       const prompt = task.messages.map(message => message.content).join('\n')
@@ -777,7 +762,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: blueprintJson([1]),
         finishReason: 'stop',
-        receipt: attemptReceipt(2, 100, 200, 'stop'),
+        receipt: attemptReceipt(2, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({
@@ -798,7 +783,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'invalid_output', reason: 'malformed_output' },
-      receipt: { calls: 2, requestedTokens: 200 },
+      receipt: { calls: 2 },
     })
     expect(result).not.toHaveProperty('items')
     expect(result).not.toHaveProperty('content')
@@ -814,7 +799,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: attempt === 1 ? '{"values":[12]' : '{"values":[1,2]}',
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor<number, number>({
@@ -842,7 +827,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: attempt === 1 ? '{"blueprints":[{"chapterNumber":1,"title":"A B"}' : '{"blueprints":[{"chapterNumber":1,"title":"AB"}]}',
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -860,7 +845,7 @@ describe('StructuredBatchExecutor seam', () => {
         ? '{"blueprints":['
         : '{"blueprints":[]}',
       finishReason: 'stop',
-      receipt: attemptReceipt(task.purpose === 'chapter-blueprints' ? 1 : 2, 100, task.purpose === 'chapter-blueprints' ? 100 : 200, 'stop'),
+      receipt: attemptReceipt(task.purpose === 'chapter-blueprints' ? 1 : 2, 100, 'stop'),
     }))
     const executor = createStructuredBatchExecutor({
       contract: { ...blueprintContract, syntaxRepairContract: () => '必须完整返回 chapterNumber=1' },
@@ -882,7 +867,7 @@ describe('StructuredBatchExecutor seam', () => {
       status: 'completed',
       content,
       finishReason: 'stop',
-      receipt: attemptReceipt(1, 100, 100, 'stop'),
+      receipt: attemptReceipt(1, 100, 'stop'),
     }))
     const executor = createStructuredBatchExecutor({
       contract: blueprintContract,
@@ -897,7 +882,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'invalid_output', reason },
-      receipt: { calls: 1, requestedTokens: 100 },
+      receipt: { calls: 1 },
     })
     expect(result).not.toHaveProperty('items')
     expect(complete).toHaveBeenCalledTimes(1)
@@ -908,7 +893,7 @@ describe('StructuredBatchExecutor seam', () => {
       status: 'completed',
       content: '{"blueprints":[]}',
       finishReason: 'stop',
-      receipt: attemptReceipt(1, 100, 100, 'stop'),
+      receipt: attemptReceipt(1, 100, 'stop'),
     }))
     const executor = createStructuredBatchExecutor({
       contract: {
@@ -929,7 +914,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'invalid_output', reason: 'invalid_item' },
-      receipt: { calls: 1, requestedTokens: 100 },
+      receipt: { calls: 1 },
     })
     expect(result).not.toHaveProperty('items')
     expect(complete).toHaveBeenCalledTimes(1)
@@ -948,14 +933,14 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[',
           finishReason: 'stop',
-          receipt: attemptReceipt(1, 100, 100, 'stop'),
+          receipt: attemptReceipt(1, 100, 'stop'),
         }
       }
       return {
         status: 'incomplete',
         content: '',
         finishReason,
-        receipt: attemptReceipt(2, 100, 200, finishReason),
+        receipt: attemptReceipt(2, 100, finishReason),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -965,7 +950,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code, reason },
-      receipt: { calls: 2, requestedTokens: 200 },
+      receipt: { calls: 2 },
     })
     expect(result).not.toHaveProperty('items')
     expect(complete).toHaveBeenCalledTimes(2)
@@ -980,7 +965,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":1,"title":"一"}',
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       if (task.purpose.endsWith(':structured-syntax-repair')) {
@@ -988,7 +973,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'incomplete',
           content: '{"blueprints":[',
           finishReason: 'length',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'length'),
+          receipt: attemptReceipt(attempt, 100, 'length'),
         }
       }
       const items = taskPayload(task).items
@@ -996,7 +981,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: blueprintJson(items),
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1006,7 +991,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }, { chapterNumber: 2 }, { chapterNumber: 3 }],
-      receipt: { calls: 4, splitCount: 1, requestedTokens: 400 },
+      receipt: { calls: 4, splitCount: 1 },
     })
   })
 
@@ -1019,7 +1004,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":1,"title":"一"}',
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       if (task.purpose.endsWith(':structured-syntax-repair')) {
@@ -1027,7 +1012,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'incomplete',
           content: '{"blueprints":[',
           finishReason: 'length',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'length'),
+          receipt: attemptReceipt(attempt, 100, 'length'),
         }
       }
       expect(task.purpose).toBe('chapter-blueprints:compact-single')
@@ -1035,7 +1020,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: blueprintJson([1]),
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1048,7 +1033,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }],
-      receipt: { calls: 3, splitCount: 0, compactSingleFallbackCount: 1, requestedTokens: 300 },
+      receipt: { calls: 3, splitCount: 0, compactSingleFallbackCount: 1 },
     })
   })
 
@@ -1078,8 +1063,6 @@ describe('StructuredBatchExecutor seam', () => {
       completionPort: { complete: physicalComplete },
       policy: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 100,
-        maxRequestedOutputTokensPerAttempt: 100,
         deadlineMs: 60_000,
       },
       now: () => 0,
@@ -1094,7 +1077,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'limit_exceeded', reason: 'max_calls' },
-      receipt: { calls: 1, requestedTokens: 100 },
+      receipt: { calls: 1 },
     })
     expect(result).not.toHaveProperty('items')
     expect(physicalComplete).toHaveBeenCalledTimes(1)
@@ -1131,8 +1114,6 @@ describe('StructuredBatchExecutor seam', () => {
       completionPort: { complete: physicalRepair },
       policy: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 100,
-        maxRequestedOutputTokensPerAttempt: 100,
         deadlineMs: 60_000,
       },
       now: () => 0,
@@ -1146,7 +1127,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: oversizedContract ? '{"blueprints":[' : oversizedEvidence,
           finishReason: 'stop',
-          receipt: attemptReceipt(1, 100, 100, 'stop'),
+          receipt: attemptReceipt(1, 100, 'stop'),
         }
       }
       return repairSession.complete(task, options)
@@ -1199,7 +1180,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: blueprintJson([1]),
           finishReason: 'stop',
-          receipt: attemptReceipt(2, 100, 200, 'stop'),
+          receipt: attemptReceipt(2, 100, 'stop'),
         }
       }
       if (task.purpose.endsWith(':compact-single')) {
@@ -1207,7 +1188,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: blueprintJson([2]),
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       expect(task.purpose).toBe('chapter-blueprints')
@@ -1217,7 +1198,7 @@ describe('StructuredBatchExecutor seam', () => {
           ? '{"blueprints":[{"chapterNumber":1,"title":"第1章"}'
           : '{"blueprints":[{"chapterNumber":2,"title":"第2章"}',
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1230,7 +1211,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }, { chapterNumber: 2 }],
-      receipt: { calls: 4, compactSingleFallbackCount: 1, requestedTokens: 400 },
+      receipt: { calls: 4, compactSingleFallbackCount: 1 },
     })
   })
 
@@ -1239,7 +1220,7 @@ describe('StructuredBatchExecutor seam', () => {
       status: 'completed',
       content: `\`\`\`json\n${blueprintJson([1])}\n\`\`\``,
       finishReason: 'stop',
-      receipt: attemptReceipt(1, 100, 100, 'stop'),
+      receipt: attemptReceipt(1, 100, 'stop'),
     }))
     const executor = createStructuredBatchExecutor({
       contract: {
@@ -1254,7 +1235,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }],
-      receipt: { calls: 1, requestedTokens: 100 },
+      receipt: { calls: 1 },
     })
     expect(complete).toHaveBeenCalledTimes(1)
   })
@@ -1281,7 +1262,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'generation_failed', reason: 'server_error' },
-      receipt: { calls: 3, splitCount: 0, requestedTokens: 300, providerRetryCount: 2 },
+      receipt: { calls: 3, splitCount: 0, providerRetryCount: 2 },
     })
     expect(generate).toHaveBeenCalledTimes(3)
   })
@@ -1312,7 +1293,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }, { chapterNumber: 2 }, { chapterNumber: 3 }, { chapterNumber: 4 }, { chapterNumber: 5 }],
-      receipt: { calls: 2, splitCount: 0, requestedTokens: 200, providerRetryCount: 1 },
+      receipt: { calls: 2, splitCount: 0, providerRetryCount: 1 },
     })
     expect(generate).toHaveBeenCalledTimes(2)
   })
@@ -1351,7 +1332,7 @@ describe('StructuredBatchExecutor seam', () => {
         throw new GenerationAttemptError(
           'PROVIDER_REQUEST_FAILED',
           '模型请求失败。',
-          attemptReceipt(1, 100, 100, 'error'),
+          attemptReceipt(1, 100, 'error'),
         )
       }
       throw new Error('the cancelled retry must not start another physical request')
@@ -1372,7 +1353,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'cancelled', reason: 'cancelled' },
-      receipt: { calls: 1, requestedTokens: 100 },
+      receipt: { calls: 1 },
     })
     expect(result).not.toHaveProperty('items')
     expect(complete).toHaveBeenCalledTimes(1)
@@ -1386,7 +1367,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'incomplete',
         content: '',
         finishReason: 'error',
-        receipt: attemptReceipt(1, 100, 100, 'error'),
+        receipt: attemptReceipt(1, 100, 'error'),
       }
     })
     const executor = createStructuredBatchExecutor({
@@ -1404,7 +1385,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'cancelled', reason: 'cancelled' },
-      receipt: { calls: 1, requestedTokens: 100 },
+      receipt: { calls: 1 },
     })
     expect(complete).toHaveBeenCalledTimes(1)
   })
@@ -1429,7 +1410,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'generation_failed', reason: 'safety' },
-      receipt: { calls: 1, splitCount: 0, requestedTokens: 100 },
+      receipt: { calls: 1, splitCount: 0 },
     })
     expect(generate).toHaveBeenCalledTimes(1)
   })
@@ -1459,7 +1440,7 @@ describe('StructuredBatchExecutor seam', () => {
         code: 'cancelled',
         reason: 'cancelled',
       },
-      receipt: { calls: 0, requestedTokens: 0 },
+      receipt: { calls: 0 },
     })
     expect(generate).not.toHaveBeenCalled()
   })
@@ -1473,7 +1454,7 @@ describe('StructuredBatchExecutor seam', () => {
       throw new GenerationAttemptError(
         'CANCELLED',
         '生成请求已取消。',
-        attemptReceipt(1, 100, 100, 'cancelled'),
+        attemptReceipt(1, 100, 'cancelled'),
       )
     })
     const executor = createStructuredBatchExecutor({
@@ -1490,7 +1471,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'cancelled', reason: 'cancelled' },
-      receipt: { calls: 1, splitCount: 0, requestedTokens: 100 },
+      receipt: { calls: 1, splitCount: 0 },
     })
     expect(complete).toHaveBeenCalledTimes(1)
   })
@@ -1547,7 +1528,6 @@ describe('StructuredBatchExecutor seam', () => {
       receipt: {
         calls: 2,
         splitCount: 0,
-        requestedTokens: 200,
       },
     })
     expect(generate).toHaveBeenCalledTimes(2)
@@ -1565,7 +1545,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'incomplete',
           content: '{"blueprints":[{"chapterNumber":1,"title":"不可信截断片段',
           finishReason: 'length',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'length'),
+          receipt: attemptReceipt(attempt, 100, 'length'),
         }
       }
       if (attempt === 3) {
@@ -1577,14 +1557,14 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: blueprintJson([1]),
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       return {
         status: 'completed',
         content: blueprintJson(request.items),
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1597,7 +1577,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }, { chapterNumber: 2 }, { chapterNumber: 3 }],
-      receipt: { calls: 4, splitCount: 1, requestedTokens: 400 },
+      receipt: { calls: 4, splitCount: 1 },
     })
     expect(observedPurposes.filter(purpose => purpose.endsWith(':compact-single')))
       .toEqual(['chapter-blueprints:compact-single'])
@@ -1622,7 +1602,7 @@ describe('StructuredBatchExecutor seam', () => {
             })
           : blueprintJson(request.items),
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({
@@ -1666,7 +1646,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'incomplete',
         content: '{"blueprints":[',
         finishReason: 'length',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'length'),
+        receipt: attemptReceipt(attempt, 100, 'length'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1679,7 +1659,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: false,
       failure: { code: 'limit_exceeded', reason: 'output_limit' },
-      receipt: { calls: 2, requestedTokens: 200 },
+      receipt: { calls: 2 },
     })
     expect(result).not.toHaveProperty('items')
     expect(complete).toHaveBeenCalledTimes(2)
@@ -1695,14 +1675,14 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: blueprintJson(request.items),
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       return {
         status: 'incomplete',
         content: '{"blueprints":[',
         finishReason: 'length',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'length'),
+        receipt: attemptReceipt(attempt, 100, 'length'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1715,7 +1695,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }, { chapterNumber: 2 }],
-      receipt: { calls: 4, requestedTokens: 400, compactSingleFallbackCount: 2 },
+      receipt: { calls: 4, compactSingleFallbackCount: 2 },
     })
     expect(complete).toHaveBeenCalledTimes(4)
   })
@@ -1731,7 +1711,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":1,"title":"一"}',
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       if (task.purpose.endsWith(':structured-syntax-repair')) {
@@ -1740,7 +1720,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":1,"title":"一"}]}',
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       const items = taskPayload(task).items
@@ -1748,7 +1728,7 @@ describe('StructuredBatchExecutor seam', () => {
         status: 'completed',
         content: blueprintJson(items),
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1758,7 +1738,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }, { chapterNumber: 2 }, { chapterNumber: 3 }],
-      receipt: { calls: 4, splitCount: 1, requestedTokens: 400 },
+      receipt: { calls: 4, splitCount: 1 },
     })
   })
 
@@ -1773,7 +1753,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":1,"title":"一"}',
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       if (task.purpose.endsWith(':structured-syntax-repair')) {
@@ -1782,7 +1762,7 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":1,"title":"一"}]}',
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       const items = taskPayload(task).items
@@ -1792,14 +1772,14 @@ describe('StructuredBatchExecutor seam', () => {
           status: 'completed',
           content: '{"blueprints":[{"chapterNumber":2,"title":"二"}',
           finishReason: 'stop',
-          receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+          receipt: attemptReceipt(attempt, 100, 'stop'),
         }
       }
       return {
         status: 'completed',
         content: blueprintJson(items),
         finishReason: 'stop',
-        receipt: attemptReceipt(attempt, 100, attempt * 100, 'stop'),
+        receipt: attemptReceipt(attempt, 100, 'stop'),
       }
     })
     const executor = createStructuredBatchExecutor({ contract: blueprintContract, session: { complete } })
@@ -1809,7 +1789,7 @@ describe('StructuredBatchExecutor seam', () => {
     expect(result).toMatchObject({
       ok: true,
       items: [{ chapterNumber: 1 }, { chapterNumber: 2 }, { chapterNumber: 3 }],
-      receipt: { calls: 6, splitCount: 2, requestedTokens: 600 },
+      receipt: { calls: 6, splitCount: 2 },
     })
   })
 })

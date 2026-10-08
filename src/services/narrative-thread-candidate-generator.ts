@@ -51,8 +51,6 @@ export interface NarrativeThreadCandidateGeneratorDependencies {
 
 export const NARRATIVE_THREAD_CANDIDATE_BUDGET = Object.freeze({
   maxAttempts: 1,
-  maxRequestedOutputTokens: 4096,
-  maxRequestedOutputTokensPerAttempt: 4096,
   deadlineMs: 120_000,
 })
 

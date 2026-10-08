@@ -19,8 +19,6 @@ import {
 
 export const PLOT_TREE_GENERATION_BUDGET = Object.freeze({
   maxAttempts: 1,
-  maxRequestedOutputTokens: 8192,
-  maxRequestedOutputTokensPerAttempt: 8192,
   deadlineMs: 10 * 60_000,
 })
 

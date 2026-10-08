@@ -25,8 +25,6 @@ export const QUALIFICATION_FIXTURE = Object.freeze({
 
 export const QUALIFICATION_SAFETY_BUDGET = Object.freeze({
   maxAttempts: 4,
-  maxRequestedOutputTokens: 32_768,
-  maxRequestedOutputTokensPerAttempt: 8192,
   deadlineMs: 10 * 60_000,
 })
 
@@ -37,9 +35,6 @@ export const QUALIFICATION_INPUT_ESTIMATE_POLICY = Object.freeze({
 
 export const QUALIFICATION_PROVIDER_LIMITS = Object.freeze({
   maxCalls: QUALIFICATION_SAFETY_BUDGET.maxAttempts,
-  maxRequestedOutputTokens: QUALIFICATION_SAFETY_BUDGET.maxRequestedOutputTokens,
-  maxRequestedOutputTokensPerAttempt:
-    QUALIFICATION_SAFETY_BUDGET.maxRequestedOutputTokensPerAttempt,
   maxPromptUtf8BytesPerCall: 45_000,
   maxPromptUtf8Bytes: 180_000,
   maxEstimatedInputTokensPerCall:
@@ -53,13 +48,31 @@ export const QUALIFICATION_PROVIDER_LIMITS = Object.freeze({
 
 export const QUALIFICATION_CAMPAIGN_LIMITS = Object.freeze({
   maxCalls: 12,
-  maxRequestedOutputTokens: 98_304,
   maxPromptUtf8Bytes: 540_000,
   maxEstimatedInputTokens:
     540_000
     + 12 * QUALIFICATION_INPUT_ESTIMATE_POLICY.fixedProtocolOverheadTokensPerCall,
   deadlineMs: 30 * 60_000,
 })
+
+/**
+ * Output capability declared on the frozen qualification model profiles
+ * themselves. The harness derives max_tokens from the model configuration, so
+ * these values only bound the worst-case dollar estimate; there is no separate
+ * application-level output-token gate anymore.
+ */
+const QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES = Object.freeze({
+  'grok-4.5': 32_768,
+  'gemini-2.5-flash-lite': 65_536,
+})
+
+function declaredOutputCapabilityTokens(profile) {
+  const candidates = [profile?.capabilities?.maxOutputTokens, profile?.maxTokens]
+  for (const value of candidates) {
+    if (Number.isSafeInteger(value) && value > 0) return value
+  }
+  return null
+}
 
 export const QUALIFICATION_PRICE_SNAPSHOTS = Object.freeze([
   Object.freeze({
@@ -132,9 +145,9 @@ const QUALIFICATION_RECEIPT_OUTPUT_SCHEMA = Object.freeze([
   'schemaVersion', 'kind', 'mode', 'qualificationScope', 'executionSeam', 'limitations',
   'provenance', 'sourceSha', 'fixtureHash', 'semanticContractHash', 'generationPolicyHash',
   'fixture', 'id', 'blueprintChapterCount', 'draftTargetCharacters', 'safetyBudget',
-  'maxAttempts', 'maxRequestedOutputTokensPerAttempt', 'deadlineMs',
+  'maxAttempts', 'deadlineMs',
   'campaign', 'startedAt', 'deadlineAt', 'maxCalls', 'calls',
-  'maxRequestedOutputTokens', 'requestedOutputTokens', 'maxPromptUtf8Bytes',
+  'requestedOutputTokens', 'maxPromptUtf8Bytes',
   'promptUtf8Bytes', 'providers', 'provider',
   'modelName', 'modelIdentitySha256', 'endpointFingerprintSha256',
   'maxRequestedOutputTokensInOneAttempt', 'finishReasons', 'blueprintCount',
@@ -374,10 +387,10 @@ export function createQualificationProfilesFromMemory({
     protocol: grokTarget.protocol,
     modelName: grokTarget.modelName,
     baseUrl: grokTarget.baseUrl,
-    maxTokens: QUALIFICATION_SAFETY_BUDGET.maxRequestedOutputTokensPerAttempt,
+    maxTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[grokTarget.modelName],
     capabilities: {
       contextWindowTokens: null,
-      maxOutputTokens: QUALIFICATION_SAFETY_BUDGET.maxRequestedOutputTokensPerAttempt,
+      maxOutputTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[grokTarget.modelName],
     },
     qualificationPriceSnapshot: QUALIFICATION_PRICE_SNAPSHOTS[1],
   }
@@ -390,10 +403,10 @@ export function createQualificationProfilesFromMemory({
     apiKey: String(geminiApiKey || '').trim(),
     baseUrl: geminiTarget.baseUrl,
     temperature: 0.6,
-    maxTokens: QUALIFICATION_SAFETY_BUDGET.maxRequestedOutputTokensPerAttempt,
+    maxTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[geminiTarget.modelName],
     capabilities: {
       contextWindowTokens: null,
-      maxOutputTokens: QUALIFICATION_SAFETY_BUDGET.maxRequestedOutputTokensPerAttempt,
+      maxOutputTokens: QUALIFICATION_DECLARED_OUTPUT_CAPABILITIES[geminiTarget.modelName],
       reasoning: true,
       structuredOutput: true,
       usage: true,
@@ -513,10 +526,10 @@ function promptUtf8Bytes(messages) {
   return Buffer.byteLength(canonicalJson(messages), 'utf8')
 }
 
-function estimatedSnapshotUsd(snapshot, promptTokenUpperBound, requestedOutputTokens) {
+function estimatedSnapshotUsd(snapshot, inputTokenQuantity, completionTokenQuantity) {
   return (
-    (promptTokenUpperBound * snapshot.inputUsdPerMillionTokens)
-    + (requestedOutputTokens * snapshot.outputUsdPerMillionTokens)
+    (inputTokenQuantity * snapshot.inputUsdPerMillionTokens)
+    + (completionTokenQuantity * snapshot.outputUsdPerMillionTokens)
   ) / 1_000_000
 }
 
@@ -547,15 +560,19 @@ function roundedUsd(value) {
 /**
  * One preflight ledger exists before product runtime loading. Every physical
  * completion reserves campaign and provider capacity before its delegate can
- * call fetch. Prompt UTF-8 bytes are a conservative hard input-token estimate:
- * a UTF-8 token cannot contain less than one byte. Dollar values are optional,
- * snapshot-based estimates and never participate in authorization.
+ * call fetch. Capacity is counted in calls, prompt UTF-8 bytes and estimated
+ * input tokens — all decidable before the request is sent. Output tokens are
+ * never reserved or gated: the harness derives max_tokens from the model's own
+ * declared capability, so a quantity that is only known after the response
+ * cannot be used as a limit. Dollar values are optional, snapshot-based
+ * estimates over observed usage and never participate in authorization.
  */
 function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }) {
   const campaignDeadlineAt = campaignStartedAt + QUALIFICATION_CAMPAIGN_LIMITS.deadlineMs
   const campaign = {
     calls: 0,
     requestedOutputTokens: 0,
+    maxRequestedOutputTokensInOneAttempt: 0,
     promptUtf8Bytes: 0,
     estimatedInputTokens: 0,
   }
@@ -564,6 +581,7 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
     deadlineAt: null,
     calls: 0,
     requestedOutputTokens: 0,
+    maxRequestedOutputTokensInOneAttempt: 0,
     promptUtf8Bytes: 0,
     estimatedInputTokens: 0,
     blueprintResponseFormat: null,
@@ -605,8 +623,6 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
       if (
         !Number.isSafeInteger(requestedOutputTokens)
         || requestedOutputTokens < 1
-        || requestedOutputTokens
-          > QUALIFICATION_PROVIDER_LIMITS.maxRequestedOutputTokensPerAttempt
         || !Array.isArray(request.messages)
       ) {
         throw new QualificationFailure('INVALID_PREFLIGHT_REQUEST')
@@ -626,19 +642,25 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
       const providerNext = {
         calls: state.calls + 1,
         requestedOutputTokens: state.requestedOutputTokens + requestedOutputTokens,
+        maxRequestedOutputTokensInOneAttempt: Math.max(
+          state.maxRequestedOutputTokensInOneAttempt,
+          requestedOutputTokens,
+        ),
         promptUtf8Bytes: state.promptUtf8Bytes + requestPromptUtf8Bytes,
         estimatedInputTokens: state.estimatedInputTokens + requestEstimatedInputTokens,
       }
       const campaignNext = {
         calls: campaign.calls + 1,
         requestedOutputTokens: campaign.requestedOutputTokens + requestedOutputTokens,
+        maxRequestedOutputTokensInOneAttempt: Math.max(
+          campaign.maxRequestedOutputTokensInOneAttempt,
+          requestedOutputTokens,
+        ),
         promptUtf8Bytes: campaign.promptUtf8Bytes + requestPromptUtf8Bytes,
         estimatedInputTokens: campaign.estimatedInputTokens + requestEstimatedInputTokens,
       }
       if (
         providerNext.calls > QUALIFICATION_PROVIDER_LIMITS.maxCalls
-        || providerNext.requestedOutputTokens
-          > QUALIFICATION_PROVIDER_LIMITS.maxRequestedOutputTokens
         || providerNext.promptUtf8Bytes > QUALIFICATION_PROVIDER_LIMITS.maxPromptUtf8Bytes
         || providerNext.estimatedInputTokens
           > QUALIFICATION_PROVIDER_LIMITS.maxEstimatedInputTokens
@@ -647,8 +669,6 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
       }
       if (
         campaignNext.calls > QUALIFICATION_CAMPAIGN_LIMITS.maxCalls
-        || campaignNext.requestedOutputTokens
-          > QUALIFICATION_CAMPAIGN_LIMITS.maxRequestedOutputTokens
         || campaignNext.promptUtf8Bytes > QUALIFICATION_CAMPAIGN_LIMITS.maxPromptUtf8Bytes
         || campaignNext.estimatedInputTokens
           > QUALIFICATION_CAMPAIGN_LIMITS.maxEstimatedInputTokens
@@ -671,11 +691,12 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
     providerSnapshot(profile) {
       const state = stateFor(profile)
       const priceSnapshot = currentQualificationPriceSnapshot(profile, now())
+      const outputCeiling = declaredOutputCapabilityTokens(profile)
       return {
         maxCalls: QUALIFICATION_PROVIDER_LIMITS.maxCalls,
         calls: state.calls,
-        maxRequestedOutputTokens: QUALIFICATION_PROVIDER_LIMITS.maxRequestedOutputTokens,
         requestedOutputTokens: state.requestedOutputTokens,
+        maxRequestedOutputTokensInOneAttempt: state.maxRequestedOutputTokensInOneAttempt,
         maxPromptUtf8Bytes: QUALIFICATION_PROVIDER_LIMITS.maxPromptUtf8Bytes,
         promptUtf8Bytes: state.promptUtf8Bytes,
         maxEstimatedInputTokens: QUALIFICATION_PROVIDER_LIMITS.maxEstimatedInputTokens,
@@ -683,7 +704,7 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
         deadlineAt: state.deadlineAt,
         blueprintResponseFormat: state.blueprintResponseFormat,
         priceEstimateStatus: priceSnapshot ? 'current-snapshot' : 'unavailable',
-        ...(priceSnapshot ? {
+        ...(priceSnapshot && outputCeiling ? {
           priceSnapshot: { ...priceSnapshot },
           estimatedReservedUsd: roundedUsd(estimatedSnapshotUsd(
             priceSnapshot,
@@ -693,7 +714,7 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
           estimatedWorstCaseUsd: roundedUsd(estimatedSnapshotUsd(
             priceSnapshot,
             QUALIFICATION_PROVIDER_LIMITS.maxEstimatedInputTokens,
-            QUALIFICATION_PROVIDER_LIMITS.maxRequestedOutputTokens,
+            QUALIFICATION_SAFETY_BUDGET.maxAttempts * outputCeiling,
           )),
         } : {}),
       }
@@ -703,15 +724,18 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
       const pricedProviders = profiles.map(profile => ({
         snapshot: currentQualificationPriceSnapshot(profile, now()),
         state: stateFor(profile),
+        profile,
       }))
-      const completePriceEstimate = pricedProviders.every(entry => entry.snapshot)
+      const completePriceEstimate = pricedProviders.every(entry => (
+        entry.snapshot && declaredOutputCapabilityTokens(entry.profile)
+      ))
       return {
         startedAt: campaignStartedAt,
         deadlineAt: campaignDeadlineAt,
         maxCalls: QUALIFICATION_CAMPAIGN_LIMITS.maxCalls,
         calls: campaign.calls,
-        maxRequestedOutputTokens: QUALIFICATION_CAMPAIGN_LIMITS.maxRequestedOutputTokens,
         requestedOutputTokens: campaign.requestedOutputTokens,
+        maxRequestedOutputTokensInOneAttempt: campaign.maxRequestedOutputTokensInOneAttempt,
         maxPromptUtf8Bytes: QUALIFICATION_CAMPAIGN_LIMITS.maxPromptUtf8Bytes,
         promptUtf8Bytes: campaign.promptUtf8Bytes,
         maxEstimatedInputTokens: QUALIFICATION_CAMPAIGN_LIMITS.maxEstimatedInputTokens,
@@ -731,7 +755,8 @@ function createQualificationPreflightLedger({ profiles, campaignStartedAt, now }
             total + estimatedSnapshotUsd(
               entry.snapshot,
               QUALIFICATION_PROVIDER_LIMITS.maxEstimatedInputTokens,
-              QUALIFICATION_PROVIDER_LIMITS.maxRequestedOutputTokens,
+              QUALIFICATION_SAFETY_BUDGET.maxAttempts
+                * (declaredOutputCapabilityTokens(entry.profile) ?? 0),
             )
           ), 0)),
         } : {}),
@@ -946,7 +971,7 @@ export function blueprintQualificationFailureCode(profile, failure, responseEnve
   const reason = new Set([
     'server_error', 'authentication', 'safety', 'cancelled', 'deadline', 'unknown',
     'missing_item', 'duplicate_item', 'unexpected_item', 'invalid_item',
-    'malformed_output', 'output_limit', 'max_calls', 'max_requested_tokens',
+    'malformed_output', 'output_limit', 'max_calls',
     'invalid_limit',
   ]).has(failure?.reason)
     ? failure.reason.toUpperCase()
@@ -1064,12 +1089,11 @@ async function qualifyOneProfile({
   })
 
   const { attempts, blueprints, draft } = generationResult
-  const requestedOutputTokens = attempts.reduce(
-    (total, attempt) => total + attempt.budget.requestedOutputTokens,
-    0,
-  )
+  // Attempt receipts no longer carry a token ledger: the generation space handed
+  // to the model (max_tokens) is a request parameter derived from the model's own
+  // declared capability, so the preflight ledger records it for reporting only.
   const preflight = preflightLedger.providerSnapshot(profile)
-  if (preflight.calls !== attempts.length || preflight.requestedOutputTokens !== requestedOutputTokens) {
+  if (preflight.calls !== attempts.length) {
     throw new QualificationFailure('PREFLIGHT_RECEIPT_MISMATCH')
   }
   const receiptCore = {
@@ -1081,7 +1105,7 @@ async function qualifyOneProfile({
     startedAt,
     deadlineAt: preflight.deadlineAt,
     calls: attempts.length,
-    requestedOutputTokens,
+    requestedOutputTokens: preflight.requestedOutputTokens,
     maxPromptUtf8Bytes: preflight.maxPromptUtf8Bytes,
     promptUtf8Bytes: preflight.promptUtf8Bytes,
     maxEstimatedInputTokens: preflight.maxEstimatedInputTokens,
@@ -1094,10 +1118,7 @@ async function qualifyOneProfile({
       estimatedReservedUsd: preflight.estimatedReservedUsd,
       estimatedWorstCaseUsd: preflight.estimatedWorstCaseUsd,
     } : {}),
-    maxRequestedOutputTokensInOneAttempt: Math.max(
-      0,
-      ...attempts.map(attempt => attempt.budget.requestedOutputTokens),
-    ),
+    maxRequestedOutputTokensInOneAttempt: preflight.maxRequestedOutputTokensInOneAttempt,
     finishReasons: attempts.map(attempt => attempt.finishReason),
     blueprintCount: blueprints.length,
     blueprintSha256: sha256(blueprints),

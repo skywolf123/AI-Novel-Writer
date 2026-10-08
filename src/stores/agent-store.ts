@@ -28,8 +28,6 @@ import type { Locale } from '../i18n/types'
 
 export const AGENT_GENERATION_BUDGET = Object.freeze({
   maxAttempts: 8,
-  maxRequestedOutputTokens: 65_536,
-  maxRequestedOutputTokensPerAttempt: 8192,
   deadlineMs: 20 * 60_000,
 })
 

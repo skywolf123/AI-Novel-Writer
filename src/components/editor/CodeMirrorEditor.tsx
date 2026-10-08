@@ -46,8 +46,6 @@ const AI_ACTIONS = [
 
 const EDITOR_AI_GENERATION_BUDGET = Object.freeze({
   maxAttempts: 1,
-  maxRequestedOutputTokens: 4096,
-  maxRequestedOutputTokensPerAttempt: 4096,
   deadlineMs: 120_000,
 })
 

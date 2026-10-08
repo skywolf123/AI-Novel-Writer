@@ -14,7 +14,6 @@ export interface SafeDiagnosticWorkflow {
   promptBudgetReport?: {
     totalUtf8Bytes?: unknown
     limitUtf8Bytes?: unknown
-    reservedOutputTokens?: unknown
     sections?: readonly PromptBudgetSection[]
   }
   [key: string]: unknown
@@ -100,13 +99,13 @@ export function formatSafeCallDiagnostic(input: SafeCallDiagnosticInput): string
     version: '应用版本', platform: '平台', actualModel: '实际模型', model: '模型 ID', purpose: '用途', requested: '请求时间', duration: '耗时（毫秒）',
     prompt: '输入 Tokens', completion: '输出 Tokens', total: '总 Tokens', result: '调用结果', success: '成功', failure: '失败',
     status: '工作流状态', failureCode: '工作流失败码', step: '步骤', stepStatus: '步骤状态', stepFailure: '步骤失败码', finish: '结束原因',
-    actual: '实际字节', limit: '限制字节', reserved: '预留输出 Tokens', section: '区段', bytes: '字节',
+    actual: '实际字节', limit: '限制字节', section: '区段', bytes: '字节',
   } : {
     title: 'AI Novel Writer safe diagnostics', environment: 'Environment', call: 'Model call', workflow: 'Workflow', budget: 'Prompt budget',
     version: 'App version', platform: 'Platform', actualModel: 'Actual model', model: 'Model ID', purpose: 'Purpose', requested: 'Request time', duration: 'Duration (ms)',
     prompt: 'Prompt tokens', completion: 'Completion tokens', total: 'Total tokens', result: 'Call result', success: 'success', failure: 'failure',
     status: 'Workflow status', failureCode: 'Workflow failure code', step: 'Step', stepStatus: 'Step status', stepFailure: 'Step failure code', finish: 'Finish reason',
-    actual: 'Actual bytes', limit: 'Limit bytes', reserved: 'Reserved output tokens', section: 'Section', bytes: 'Bytes',
+    actual: 'Actual bytes', limit: 'Limit bytes', section: 'Section', bytes: 'Bytes',
   }
 
   const lines = [
@@ -134,7 +133,6 @@ export function formatSafeCallDiagnostic(input: SafeCallDiagnosticInput): string
     '', `## ${labels.budget}`,
     `- ${labels.actual}: ${value(safeNumber(budget?.totalUtf8Bytes))}`,
     `- ${labels.limit}: ${value(safeNumber(budget?.limitUtf8Bytes))}`,
-    `- ${labels.reserved}: ${value(safeNumber(budget?.reservedOutputTokens))}`,
     '', `| ${labels.section} | ${labels.bytes} |`, '| --- | ---: |',
     ...(sections.length > 0 ? sections.map(section => `| ${section.name} | ${section.bytes} |`) : [`| ${unknown} | ${unknown} |`]),
   ]

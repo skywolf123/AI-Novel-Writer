@@ -117,10 +117,6 @@ describe('decidePolishGate', () => {
 describe('isSessionBudgetExhausted', () => {
   it('recognizes session-level budget exhaustion codes', () => {
     expect(isSessionBudgetExhausted(new GenerationHarnessError(
-      'REQUESTED_TOKEN_BUDGET_EXHAUSTED',
-      '生成会话已用尽请求 Token 预算。',
-    ))).toBe(true)
-    expect(isSessionBudgetExhausted(new GenerationHarnessError(
       'ATTEMPT_BUDGET_EXHAUSTED',
       '生成会话已用尽请求次数。',
     ))).toBe(true)

@@ -55,7 +55,6 @@ function promptBudgetReport(sectionName: string): PromptBudgetReport {
   return {
     totalUtf8Bytes: 13_000,
     limitUtf8Bytes: 12_000,
-    reservedOutputTokens: 8_192,
     sections: [
       { sectionName, utf8Bytes: 12_000 },
       { sectionName: 'prompt-overhead', utf8Bytes: 1_000 },
