@@ -61,8 +61,6 @@ describe('GenerationRuntime', () => {
       modelId: 'model-b',
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     }, environment)
@@ -92,8 +90,6 @@ describe('GenerationRuntime', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     }, environment)
@@ -134,8 +130,6 @@ describe('GenerationRuntime', () => {
       modelId: 'deleted-model',
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     }, environment)).rejects.toMatchObject({
@@ -148,10 +142,8 @@ describe('GenerationRuntime', () => {
   })
 
   it.each([
-    ['attempts', { maxAttempts: 33, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 }],
-    ['total requested tokens', { maxAttempts: 1, maxRequestedOutputTokens: 147_457, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 }],
-    ['per-attempt requested tokens', { maxAttempts: 1, maxRequestedOutputTokens: 32_769, maxRequestedOutputTokensPerAttempt: 32_769, deadlineMs: 60_000 }],
-    ['deadline', { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 3_600_001 }],
+    ['attempts', { maxAttempts: 33, deadlineMs: 60_000 }],
+    ['deadline', { maxAttempts: 1, deadlineMs: 3_600_001 }],
   ])('rejects an oversized %s budget before reading a model or opening a lease', async (_label, budget) => {
     const snapshotDefaultModelId = vi.fn(() => 'model-a')
     const beginModelExecution = vi.fn<GenerationRuntimeEnvironment['beginModelExecution']>()
@@ -188,8 +180,6 @@ describe('GenerationRuntime', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 2,
-        maxRequestedOutputTokens: 8192,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     }, environment)
@@ -221,8 +211,6 @@ describe('GenerationRuntime', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now++)
     const budget = {
       maxAttempts: 3,
-      maxRequestedOutputTokens: 9000,
-      maxRequestedOutputTokensPerAttempt: 3000,
       deadlineMs: 60_000,
     }
     const environment: GenerationRuntimeEnvironment = {
@@ -234,8 +222,6 @@ describe('GenerationRuntime', () => {
     const runtime = await createGenerationRuntime({ budget }, environment)
 
     budget.maxAttempts = 99
-    budget.maxRequestedOutputTokens = 99_999
-    budget.maxRequestedOutputTokensPerAttempt = 99_999
     budget.deadlineMs = 999_999
 
     await runtime.execute(async scope => {
@@ -244,8 +230,6 @@ describe('GenerationRuntime', () => {
       const outcome = await session.complete(task('budget-source'))
       expect(outcome.receipt.budget).toMatchObject({
         maxAttempts: 3,
-        maxRequestedOutputTokens: 9000,
-        maxRequestedOutputTokensPerAttempt: 3000,
       })
     })
     nowSpy.mockRestore()
@@ -259,8 +243,8 @@ describe('GenerationRuntime', () => {
       closeModelExecution: vi.fn().mockResolvedValue(undefined),
     }
     const duplicated = {
-      budget: { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 },
-      policy: { maxAttempts: 999, maxRequestedOutputTokens: 999_999, maxRequestedOutputTokensPerAttempt: 999_999, deadlineMs: 999_999 },
+      budget: { maxAttempts: 1, deadlineMs: 60_000 },
+      policy: { maxAttempts: 999, deadlineMs: 999_999 },
     }
 
     // @ts-expect-error Callers cannot supply a second physical budget.
@@ -279,7 +263,7 @@ describe('GenerationRuntime', () => {
       closeModelExecution,
     }
     const runtime = await createGenerationRuntime({
-      budget: { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 },
+      budget: { maxAttempts: 1, deadlineMs: 60_000 },
     }, environment)
 
     await runtime.close()
@@ -302,7 +286,7 @@ describe('GenerationRuntime', () => {
       closeModelExecution,
     }
     const runtime = await createGenerationRuntime({
-      budget: { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 },
+      budget: { maxAttempts: 1, deadlineMs: 60_000 },
     }, environment)
 
     await expect(runtime.execute(async () => {
@@ -323,7 +307,7 @@ describe('GenerationRuntime', () => {
     }
 
     await expect(createGenerationRuntime({
-      budget: { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 },
+      budget: { maxAttempts: 1, deadlineMs: 60_000 },
     }, environment)).rejects.toMatchObject({ code: 'LEASE_IDENTITY_MISMATCH' })
     expect(closeModelExecution).toHaveBeenCalledOnce()
     expect(closeModelExecution).toHaveBeenCalledWith('model-execution-lease-a')
@@ -346,7 +330,7 @@ describe('GenerationRuntime', () => {
     }
 
     await expect(createGenerationRuntime({
-      budget: { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 },
+      budget: { maxAttempts: 1, deadlineMs: 60_000 },
     }, environment)).rejects.toMatchObject({ code: 'LEASE_CAPABILITY_INVALID' })
     expect(completeWithLease).not.toHaveBeenCalled()
     expect(closeModelExecution).toHaveBeenCalledWith('model-execution-lease-a')
@@ -366,7 +350,7 @@ describe('GenerationRuntime', () => {
     let beginFailure: unknown
     try {
       await createGenerationRuntime({
-        budget: { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 },
+        budget: { maxAttempts: 1, deadlineMs: 60_000 },
       }, beginFailureEnvironment)
     } catch (error) {
       beginFailure = error
@@ -385,7 +369,7 @@ describe('GenerationRuntime', () => {
       closeModelExecution,
     }
     const runtime = await createGenerationRuntime({
-      budget: { maxAttempts: 1, maxRequestedOutputTokens: 4096, maxRequestedOutputTokensPerAttempt: 4096, deadlineMs: 60_000 },
+      budget: { maxAttempts: 1, deadlineMs: 60_000 },
     }, closeFailureEnvironment)
 
     await expect(runtime.execute(async () => 'completed operation'))

@@ -48,7 +48,6 @@ describe('formatSafeCallDiagnostic', () => {
         promptBudgetReport: {
           totalUtf8Bytes: 1024,
           limitUtf8Bytes: 2048,
-          reservedOutputTokens: 512,
           sections: [{ sectionName: 'continuity', utf8Bytes: 320 }],
         },
         // Lures prove the formatter never serializes arbitrary input fields.

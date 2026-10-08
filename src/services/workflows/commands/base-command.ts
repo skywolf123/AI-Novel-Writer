@@ -135,36 +135,24 @@ export const POLISH_FLOW_CONTINUATION_LIMITS = Object.freeze({
 })
 
 /**
- * Intent cost ceilings are product policy, never model profiles. The runtime
- * still plans every physical request from the frozen lease capability receipt.
- *
- * `maxRequestedOutputTokensPerAttempt` here is the product ceiling for one
- * physical request, not the request size. The harness narrows it further to
- * the selected model's own declared output limit before planning, so a model
- * that can answer 32768 tokens is asked for 32768 instead of a stale 8192.
+ * Intent limits are product policy, never model profiles. A session is bounded
+ * only by how many physical requests it may issue and how long it may run; the
+ * size of one request is the model's own declared output capability, so no
+ * token-quantity limit is expressed here.
  */
 export const WORKFLOW_GENERATION_BUDGETS = Object.freeze({
   structured: Object.freeze({
     maxAttempts: 16,
-    maxRequestedOutputTokens: 131_072,
-    maxRequestedOutputTokensPerAttempt:
-      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
     deadlineMs: 10 * 60_000,
   }),
   text: Object.freeze({
     maxAttempts: 8,
-    maxRequestedOutputTokens: 65_536,
-    maxRequestedOutputTokensPerAttempt:
-      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
     deadlineMs: 20 * 60_000,
   }),
   'character-architecture': Object.freeze({
     // Worst recoverable path: manifest replacements, bounded detail batches,
     // and one syntax-only repair on a slow provider.
     maxAttempts: 12,
-    maxRequestedOutputTokens: 98_304,
-    maxRequestedOutputTokensPerAttempt:
-      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
     deadlineMs: 20 * 60_000,
   }),
   polish: Object.freeze({
@@ -180,9 +168,6 @@ export const WORKFLOW_GENERATION_BUDGETS = Object.freeze({
         + (1 + POLISH_FLOW_CONTINUATION_LIMITS.patch)
       return Math.min(attempts, GENERATION_ABSOLUTE_BUDGET_LIMITS.maxAttempts)
     })(),
-    maxRequestedOutputTokens: GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokens,
-    maxRequestedOutputTokensPerAttempt:
-      GENERATION_ABSOLUTE_BUDGET_LIMITS.maxRequestedOutputTokensPerAttempt,
     deadlineMs: 40 * 60_000,
   }),
 })
@@ -326,7 +311,10 @@ export abstract class BaseWorkflowCommand<TResult = string> {
       uiLocale: context.uiLocale ?? 'zh-CN',
       promptBudget: {
         contextWindowTokens: completion.receipt.capabilities.contextWindowTokens,
-        maxOutputTokens: completion.receipt.budget.requestedOutputTokens,
+        // Continuation sizing reserves the model's declared output capability.
+        // The harness may grant less after context clamping, so this is the
+        // conservative bound — never a token ledger read back from a receipt.
+        maxOutputTokens: completion.receipt.capabilities.maxOutputTokens,
         systemPromptChars: systemPrompt.length,
       },
       preserveCompleteStructuredPrompt: continuation.mode === 'replace-structured-output'
@@ -414,7 +402,7 @@ export abstract class BaseWorkflowCommand<TResult = string> {
         ? undefined
         : {
             contextWindowTokens: initialReceipt?.capabilities?.contextWindowTokens,
-            maxOutputTokens: initialReceipt?.budget?.requestedOutputTokens,
+            maxOutputTokens: initialReceipt?.capabilities?.maxOutputTokens,
             systemPromptChars: options.systemPrompt.length,
           },
       isCancelled: () => options.context.cancelled,

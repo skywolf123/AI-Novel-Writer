@@ -113,8 +113,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 2,
-        maxRequestedOutputTokens: 8192,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -157,8 +155,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
       creativeStrategy: 'consistency-first',
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -207,8 +203,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
       projectSession,
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -256,8 +250,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
     const runtimePromise = createGenerationRuntime({
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -289,8 +281,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -310,8 +300,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -368,8 +356,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -415,8 +401,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -450,8 +434,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
     const runtime = await createGenerationRuntime({
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })
@@ -490,8 +472,6 @@ describe('GenerationRuntime renderer lease adapter', () => {
       modelId: 'deleted-model',
       budget: {
         maxAttempts: 1,
-        maxRequestedOutputTokens: 4096,
-        maxRequestedOutputTokensPerAttempt: 4096,
         deadlineMs: 60_000,
       },
     })).rejects.toMatchObject({

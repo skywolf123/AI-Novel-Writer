@@ -418,7 +418,6 @@ describe('workflow pause at a safe step boundary', () => {
     const failure = new PromptBudgetExceededError({
       totalUtf8Bytes: 13_000,
       limitUtf8Bytes: 12_000,
-      reservedOutputTokens: 8_192,
       sections: [
         { sectionName: 'global-guidance', utf8Bytes: 12_020 },
         { sectionName: 'reference-works', utf8Bytes: 400 },

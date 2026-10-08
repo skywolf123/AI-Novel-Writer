@@ -155,7 +155,6 @@ describe('workflow generation prompt budget diagnostics', () => {
     const expectedReport = expect.objectContaining({
       totalUtf8Bytes: expect.any(Number),
       limitUtf8Bytes: 2048,
-      reservedOutputTokens: 4096,
       modelId: 'model-a',
       errorCode: 'OK',
       sections: [

@@ -46,7 +46,6 @@ describe('safe diagnostic copy action', () => {
       promptBudgetReport: {
         totalUtf8Bytes: 1024,
         limitUtf8Bytes: 2048,
-        reservedOutputTokens: 512,
         sections: [{ sectionName: 'continuity', utf8Bytes: 320 }],
       },
     }} />))

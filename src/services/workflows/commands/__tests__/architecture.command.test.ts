@@ -820,7 +820,6 @@ describe('GenerateCharactersCommand structured roster seam', () => {
       code: 'PROMPT_BUDGET_EXHAUSTED',
       report: {
         limitUtf8Bytes: 32_768,
-        reservedOutputTokens: 8192,
         modelId: 'model-1',
         errorCode: 'PROMPT_BUDGET_EXHAUSTED',
         sections: expect.arrayContaining([

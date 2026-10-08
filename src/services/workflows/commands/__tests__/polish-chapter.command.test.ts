@@ -345,9 +345,8 @@ describe('PolishChapterCommand', () => {
       callbacks: callbacks(),
     })
 
-    // Derived worst path: (1+3) + (1+1) + (1+3) + (1+1) + (1+2) = 15 attempts,
-    // token cap clamped to the absolute limit.
-    expect(capturedBudget).toMatchObject({ maxAttempts: 15, maxRequestedOutputTokens: 147_456 })
+    // Derived worst path: (1+3) + (1+1) + (1+3) + (1+1) + (1+2) = 15 attempts.
+    expect(capturedBudget).toMatchObject({ maxAttempts: 15 })
   })
 
   it('prefers the latest candidate when deterministic scores tie (rounds keep their fixes)', async () => {

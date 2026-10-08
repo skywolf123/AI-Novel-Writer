@@ -66,7 +66,7 @@ export function formatPromptBudgetFailure(report: PromptBudgetReport, locale: Lo
       ? '未知'
       : `${formatInteger(report.estimatedInputTokens, locale)} tokens`
     return [
-      `提示词共 ${formatInteger(report.totalUtf8Bytes, locale)} UTF-8 字节，超过上限 ${formatInteger(report.limitUtf8Bytes, locale)} 字节；输出保留空间为 ${formatInteger(report.reservedOutputTokens, locale)} tokens。`,
+      `提示词共 ${formatInteger(report.totalUtf8Bytes, locale)} UTF-8 字节，超过上限 ${formatInteger(report.limitUtf8Bytes, locale)} 字节。`,
       `模型上下文：${contextWindow}；估算输入：${estimatedInput}。`,
       `主要占用：${contributors}。`,
       `模型：${report.modelId}；结果码：${report.errorCode}。`,
@@ -80,7 +80,7 @@ export function formatPromptBudgetFailure(report: PromptBudgetReport, locale: Lo
     ? 'unknown'
     : `${formatInteger(report.estimatedInputTokens, locale)} tokens`
   return [
-    `The prompt uses ${formatInteger(report.totalUtf8Bytes, locale)} UTF-8 bytes, exceeding the ${formatInteger(report.limitUtf8Bytes, locale)}-byte limit; ${formatInteger(report.reservedOutputTokens, locale)} tokens are reserved for output. `,
+    `The prompt uses ${formatInteger(report.totalUtf8Bytes, locale)} UTF-8 bytes, exceeding the ${formatInteger(report.limitUtf8Bytes, locale)}-byte limit. `,
     `Model context: ${contextWindow}; estimated input: ${estimatedInput}. `,
     `Top contributors: ${contributors}. `,
     `Model: ${report.modelId}; result code: ${report.errorCode}.`,

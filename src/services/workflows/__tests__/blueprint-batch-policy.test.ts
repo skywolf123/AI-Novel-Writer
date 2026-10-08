@@ -19,7 +19,6 @@ describe('blueprint batch policy', () => {
       maxCompactSingleFallbacks: 4,
       runtimeBudget: {
         maxAttempts: 12,
-        maxRequestedOutputTokens: 49_152,
         deadlineMs: 1_440_000,
       },
     })
@@ -32,8 +31,6 @@ describe('blueprint batch policy', () => {
       exceedsHardLimit: false,
       runtimeBudget: {
         maxAttempts: 15,
-        maxRequestedOutputTokens: 61_440,
-        maxRequestedOutputTokensPerAttempt: 4_096,
         deadlineMs: 1_800_000,
       },
     })
@@ -45,8 +42,6 @@ describe('blueprint batch policy', () => {
       exceedsHardLimit: false,
       runtimeBudget: {
         maxAttempts: 31,
-        maxRequestedOutputTokens: 126_976,
-        maxRequestedOutputTokensPerAttempt: 4_096,
       },
     })
     expect(planBlueprintGenerationCost(50)).toMatchObject({
@@ -57,7 +52,6 @@ describe('blueprint batch policy', () => {
       exceedsHardLimit: false,
       runtimeBudget: {
         maxAttempts: 32,
-        maxRequestedOutputTokens: 131_072,
         deadlineMs: 1_800_000,
       },
     })
@@ -67,7 +61,7 @@ describe('blueprint batch policy', () => {
       maxCalls: 32,
       maxCompactSingleFallbacks: 51,
       exceedsHardLimit: true,
-      runtimeBudget: { maxAttempts: 32, maxRequestedOutputTokens: 131_072 },
+      runtimeBudget: { maxAttempts: 32 },
     })
   })
 

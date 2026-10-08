@@ -3,10 +3,8 @@ export const MAX_BLUEPRINT_ITEMS_PER_BATCH = 5
 export const DEFAULT_BLUEPRINT_GENERATION_COUNT = MAX_BLUEPRINT_ITEMS_PER_BATCH
 
 const DIRECTORY_MAX_ATTEMPTS_HARD_LIMIT = 32
-const DIRECTORY_MAX_REQUESTED_TOKENS = 131_072
 const DIRECTORY_SYNTAX_REPAIR_RESERVE_CALLS = 1
 export const MAX_BLUEPRINT_CHAPTERS_PER_TASK = 50
-const DIRECTORY_MAX_REQUESTED_TOKENS_PER_ATTEMPT = 4_096
 const DIRECTORY_MIN_DEADLINE_MS = 10 * 60_000
 const DIRECTORY_MAX_DEADLINE_MS = 30 * 60_000
 const DIRECTORY_DEADLINE_PER_ATTEMPT_MS = 2 * 60_000
@@ -23,8 +21,6 @@ export interface BlueprintGenerationCostPlan {
   exceedsHardLimit: boolean
   runtimeBudget: {
     maxAttempts: number
-    maxRequestedOutputTokens: number
-    maxRequestedOutputTokensPerAttempt: number
     deadlineMs: number
   }
 }
@@ -61,11 +57,6 @@ export function planBlueprintGenerationCost(chapterCount: number): BlueprintGene
     exceedsHardLimit: normalizedChapterCount > MAX_BLUEPRINT_CHAPTERS_PER_TASK,
     runtimeBudget: {
       maxAttempts: maxCalls,
-      maxRequestedOutputTokens: Math.min(
-        DIRECTORY_MAX_REQUESTED_TOKENS,
-        maxCalls * DIRECTORY_MAX_REQUESTED_TOKENS_PER_ATTEMPT,
-      ),
-      maxRequestedOutputTokensPerAttempt: DIRECTORY_MAX_REQUESTED_TOKENS_PER_ATTEMPT,
       deadlineMs: Math.min(
         DIRECTORY_MAX_DEADLINE_MS,
         Math.max(

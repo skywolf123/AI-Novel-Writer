@@ -114,12 +114,12 @@ export class DirectoryBlueprintContractError extends Error {
 }
 
 function directoryGenerationFailureSummary(
-  attempts: readonly { purpose?: string; finishReason: string; budget: { requestedOutputTokens: number } }[],
+  attempts: readonly { purpose?: string; finishReason: string }[],
 ): string {
   if (attempts.length === 0) return 'generationAttempts=none'
   return attempts.map((attempt, index) => (
     `attempt=${index + 1} purpose=${attempt.purpose ?? 'unknown'} `
-    + `finishReason=${attempt.finishReason} requestedTokens=${attempt.budget.requestedOutputTokens}`
+    + `finishReason=${attempt.finishReason}`
   )).join('; ')
 }
 

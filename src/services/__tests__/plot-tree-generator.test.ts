@@ -165,7 +165,6 @@ describe('plot tree AI boundary', () => {
   it('allows exactly one request in the ten-minute planning window', () => {
     expect(PLOT_TREE_GENERATION_BUDGET).toMatchObject({
       maxAttempts: 1,
-      maxRequestedOutputTokens: 8192,
       deadlineMs: 10 * 60_000,
     })
   })
@@ -260,8 +259,6 @@ describe('plot tree AI boundary', () => {
         session: {
           budget: {
             maxAttempts: 1,
-            maxRequestedOutputTokens: 8192,
-            maxRequestedOutputTokensPerAttempt: 8192,
             deadlineAt: Date.now() + 10 * 60_000,
           },
           complete: vi.fn(async (value: GenerationTask) => {
@@ -479,8 +476,6 @@ describe('plot tree AI boundary', () => {
         session: {
           budget: {
             maxAttempts: 1,
-            maxRequestedOutputTokens: 8192,
-            maxRequestedOutputTokensPerAttempt: 8192,
             deadlineAt: Date.now() + 10 * 60_000,
           },
           complete: vi.fn(async (value: GenerationTask) => {
@@ -616,8 +611,6 @@ describe('plot tree AI boundary', () => {
         session: {
           budget: {
             maxAttempts: 1,
-            maxRequestedOutputTokens: 8192,
-            maxRequestedOutputTokensPerAttempt: 8192,
             deadlineAt: Date.now() + 10 * 60_000,
           },
           complete,
@@ -670,8 +663,6 @@ describe('plot tree AI boundary', () => {
         session: {
           budget: {
             maxAttempts: 1,
-            maxRequestedOutputTokens: 8192,
-            maxRequestedOutputTokensPerAttempt: 8192,
             deadlineAt: Date.now() + 10 * 60_000,
           },
           complete,
@@ -710,8 +701,6 @@ describe('plot tree AI boundary', () => {
         session: {
           budget: {
             maxAttempts: 1,
-            maxRequestedOutputTokens: 8192,
-            maxRequestedOutputTokensPerAttempt: 8192,
             deadlineAt: Date.now() + 10 * 60_000,
           },
           complete: vi.fn().mockResolvedValue({

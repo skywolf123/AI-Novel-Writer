@@ -134,10 +134,6 @@ function generationReceipt(
     budget: Object.freeze({
       attempt,
       maxAttempts: 20,
-      requestedOutputTokens: 4096,
-      cumulativeRequestedOutputTokens: attempt * 4096,
-      maxRequestedOutputTokens: 100_000,
-      maxRequestedOutputTokensPerAttempt: 4096,
       deadlineAt: Number.MAX_SAFE_INTEGER,
     }),
     finishReason,
@@ -150,8 +146,6 @@ function generationSession(
   return {
     budget: Object.freeze({
       maxAttempts: 20,
-      maxRequestedOutputTokens: 100_000,
-      maxRequestedOutputTokensPerAttempt: 4096,
       deadlineAt: Number.MAX_SAFE_INTEGER,
     }),
     complete,
@@ -636,8 +630,6 @@ describe('GenerateDirectoryCommand', () => {
     expect(createRuntime).toHaveBeenCalledWith({
       budget: {
         maxAttempts: 20,
-        maxRequestedOutputTokens: 81_920,
-        maxRequestedOutputTokensPerAttempt: 4_096,
         deadlineMs: 1_800_000,
       },
     })
@@ -679,8 +671,6 @@ describe('GenerateDirectoryCommand', () => {
     expect(createRuntime).toHaveBeenCalledWith({
       budget: {
         maxAttempts: 31,
-        maxRequestedOutputTokens: 126_976,
-        maxRequestedOutputTokensPerAttempt: 4_096,
         deadlineMs: 1_800_000,
       },
     })
@@ -853,8 +843,6 @@ describe('GenerateDirectoryCommand', () => {
     expect(createRuntime).toHaveBeenCalledWith({
       budget: {
         maxAttempts: 15,
-        maxRequestedOutputTokens: 61_440,
-        maxRequestedOutputTokensPerAttempt: 4_096,
         deadlineMs: 1_800_000,
       },
     })
@@ -995,11 +983,11 @@ describe('GenerateDirectoryCommand', () => {
     expect(failure?.message).not.toMatch(/[\u3400-\u9fff]/u)
     expect(failure?.message).toContain('code=limit_exceeded reason=output_limit')
     expect(failure?.message).toContain(
-      'purpose=chapter-blueprint-directory:compact-single:chapter-1 finishReason=length requestedTokens=4096',
+      'purpose=chapter-blueprint-directory:compact-single:chapter-1 finishReason=length',
     )
     expect(attempt).toBe(2)
     expect(callbacks.log).toHaveBeenCalledWith(expect.stringContaining(
-      'purpose=chapter-blueprint-directory:compact-single:chapter-1 finishReason=length requestedTokens=4096',
+      'purpose=chapter-blueprint-directory:compact-single:chapter-1 finishReason=length',
     ))
     expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('db:blueprint-commit-range')
     expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('db:blueprint-upsert-many')

@@ -180,8 +180,11 @@ describe('real provider generation qualification contract', () => {
       campaign: {
         maxCalls: 12,
         calls: 6,
-        maxRequestedOutputTokens: 98_304,
-        requestedOutputTokens: 49_152,
+        // Output tokens are observed reporting derived from the model's declared
+        // capability, not an application gate: 128K (deepseek) + 8K (xai) +
+        // 64K (gemini) over two calls each, never capped by a product constant.
+        requestedOutputTokens: 403_456,
+        maxRequestedOutputTokensInOneAttempt: 128_000,
         maxEstimatedInputTokens: 564_576,
       },
       providers: [
@@ -265,10 +268,12 @@ describe('real provider generation qualification contract', () => {
       expect(provider.endpointFingerprintSha256).toMatch(/^[a-f0-9]{64}$/)
       expect(provider.calls).toBeGreaterThan(0)
       expect(provider.calls).toBeLessThanOrEqual(receipt.safetyBudget.maxAttempts)
-      expect(provider.requestedOutputTokens)
-        .toBeLessThanOrEqual(receipt.safetyBudget.maxRequestedOutputTokens)
+      // max_tokens is the model's own declared output capability; the receipt
+      // reports it for auditing but never rejects a request against it.
       expect(provider.maxRequestedOutputTokensInOneAttempt)
-        .toBeLessThanOrEqual(receipt.safetyBudget.maxRequestedOutputTokensPerAttempt)
+        .toBe(provider.capabilityEvidence.maxOutputTokens)
+      expect(provider.requestedOutputTokens)
+        .toBe(provider.calls * provider.maxRequestedOutputTokensInOneAttempt)
       expect(provider.deadlineAt).toBeGreaterThan(provider.startedAt)
       expect(provider.promptUtf8Bytes).toBeLessThanOrEqual(provider.maxPromptUtf8Bytes)
       expect(provider.estimatedInputTokens)
@@ -393,8 +398,6 @@ describe('real provider generation qualification contract', () => {
       allowBillableRequests: true,
       budget: {
         maxAttempts: 999,
-        maxRequestedOutputTokens: 999_999,
-        maxRequestedOutputTokensPerAttempt: 999_999,
         deadlineMs: 999_999,
       },
     })).rejects.toMatchObject({ code: 'BUDGET_OVERRIDE_FORBIDDEN' })

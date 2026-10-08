@@ -154,7 +154,6 @@ describe('BaseWorkflowCommand completion boundary', () => {
     })).resolves.toBe('{"ok":true}')
 
     expect(completeWithLease.mock.calls[0]?.[0].plan.maxOutputTokens).toBe(expectedRequest)
-    expect(WORKFLOW_GENERATION_BUDGETS.structured.maxRequestedOutputTokens).toBe(131_072)
   })
 
   it.each([
@@ -182,11 +181,8 @@ describe('BaseWorkflowCommand completion boundary', () => {
     expect(completeWithLease.mock.calls[0]?.[0].plan.maxOutputTokens).toBe(expectedRequest)
     expect(WORKFLOW_GENERATION_BUDGETS['character-architecture']).toEqual({
       maxAttempts: 12,
-      maxRequestedOutputTokens: 98_304,
-      maxRequestedOutputTokensPerAttempt: 32_768,
       deadlineMs: 20 * 60_000,
     })
-    expect(12 * 8192).toBe(98_304)
   })
 
   it('keeps ordinary generation single-shot and fail-closed while an unknown model uses its leased cap', async () => {

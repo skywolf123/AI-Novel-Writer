@@ -9,7 +9,6 @@ describe('writing skill prompt budget diagnostics', () => {
       limitUtf8Bytes: 12_000,
       contextWindowTokens: 16_384,
       estimatedInputTokens: 3_200,
-      reservedOutputTokens: 4_096,
       sections: [{
         sectionName: 'writing-skill',
         displayName: 'Scene Craft',

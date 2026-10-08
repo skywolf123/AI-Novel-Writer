@@ -67,7 +67,6 @@ export interface StructuredBatchLimits {
 export interface StructuredBatchReceipt {
   calls: number
   splitCount: number
-  requestedTokens: number
   attempts: readonly GenerationAttemptReceipt[]
   compactSingleFallbackCount?: number
   /** Physical provider faults that were retried, accumulated across all batches. */
@@ -85,7 +84,6 @@ export interface StructuredBatchFailure {
     | 'malformed_output'
     | 'output_limit'
     | 'max_calls'
-    | 'max_requested_tokens'
     | 'invalid_limit'
   diagnostic?: {
     code: string
@@ -142,7 +140,6 @@ export function createStructuredBatchExecutor<TInput, TOutput>(dependencies: {
       const receipt: StructuredBatchReceipt = {
         calls: 0,
         splitCount: 0,
-        requestedTokens: 0,
         attempts: attemptReceipts,
         compactSingleFallbackCount: 0,
       }
@@ -152,7 +149,6 @@ export function createStructuredBatchExecutor<TInput, TOutput>(dependencies: {
       const recordAttempt = (attempt: GenerationAttemptReceipt): void => {
         attemptReceipts.push(attempt)
         receipt.calls = attemptReceipts.length
-        receipt.requestedTokens += attempt.budget.requestedOutputTokens
         dependencies.onAttempt?.(attempt)
       }
 
@@ -576,8 +572,6 @@ export function createStructuredBatchExecutor<TInput, TOutput>(dependencies: {
         } else if (error instanceof GenerationHarnessError) {
           if (error.code === 'ATTEMPT_BUDGET_EXHAUSTED') {
             failure = { code: 'limit_exceeded', reason: 'max_calls', message: error.message }
-          } else if (error.code === 'REQUESTED_TOKEN_BUDGET_EXHAUSTED') {
-            failure = { code: 'limit_exceeded', reason: 'max_requested_tokens', message: error.message }
           } else if (error.code === 'DEADLINE_EXHAUSTED') {
             failure = { code: 'deadline', reason: 'deadline', message: error.message }
           } else if (error.code === 'CANCELLED') {

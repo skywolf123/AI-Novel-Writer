@@ -21,7 +21,6 @@ function failedRun(id: string): WorkflowRun {
   const promptBudgetReport = {
     totalUtf8Bytes: 1024,
     limitUtf8Bytes: 2048,
-    reservedOutputTokens: 512,
     sections: [{ sectionName: 'continuity', utf8Bytes: 320 }],
     modelId: '2f491640-c201-4c6e-922b-3103e8c2c5f7',
     errorCode: 'PROMPT_BUDGET_EXHAUSTED' as const,
