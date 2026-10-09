@@ -45,7 +45,8 @@ function confirmedReviewContent(
     sourceReviewId: 41,
     sourceDraft: CONFIRMED_SOURCE_DRAFT,
     summary: '原始 AI 总结不能直接作为修稿提示。',
-    authorGuidance: '保留开头的悬念。',
+    // 默认留空：无总体修稿指导时走定点补丁模式（整章模式有专门用例）。
+    authorGuidance: '',
     items: [
       {
         category: '连续性',
@@ -745,7 +746,6 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
   it('sends the same English confirmed-review brief shown by the project-language preview', async () => {
     const persistedConfirmation = confirmedReviewContent({
       sourceDraft: { ...CONFIRMED_SOURCE_DRAFT, content: 'Original reviewed chapter. '.repeat(100) },
-      authorGuidance: 'Preserve the opening suspense.',
       items: [{
         category: 'continuity',
         severity: 'error',
@@ -775,10 +775,8 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
       .map(message => message.content)
       .join('\n') ?? ''
     expect(previewBrief).toContain('[Confirmed review items included in this revision]')
-    expect(previewBrief).toContain('[Confirmed author guidance]')
     expect(prompt).toContain(previewBrief)
     expect(prompt).not.toContain('【已确认纳入本次修稿的审稿项】')
-    expect(prompt).not.toContain('【作者补充修稿指导】')
   })
 
   it('uses the persisted confirmation row as the only refinement input, records that row on the pending revision, and preserves the draft before merge', async () => {
@@ -786,7 +784,6 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
       sourceReviewId: 41,
       sourceDraft: { ...CONFIRMED_SOURCE_DRAFT, content: '原稿正文。'.repeat(250) },
       summary: '原始 AI 总结绝不能进入修稿提示。',
-      authorGuidance: '保留开头的悬念。',
       items: [
         {
           category: '连续性',
@@ -853,7 +850,6 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
     expect(begunModelIds).toEqual(['grok-selected-model'])
     const prompt = completeWithLease.mock.calls[0]?.[0].messages.map(message => message.content).join('\n') ?? ''
     expect(prompt).toContain('只修复这个已确认的问题。')
-    expect(prompt).toContain('保留开头的悬念。')
     expect(prompt).not.toContain('这个被作者忽略，不能送入模型。')
     expect(prompt).not.toContain('原始 AI 总结绝不能进入修稿提示。')
     expect(prompt).not.toContain('瞬态 UI 提示不得绕过确认快照。')
@@ -863,7 +859,7 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
       baseDraftId: 1,
       revisionType: 'review-fix',
       reviewSourceId: CONFIRMATION_REVIEW_ID,
-      userPrompt: '保留开头的悬念。',
+      userPrompt: undefined,
       content: expectedRevision,
       expectedSource: CONFIRMED_SOURCE_DRAFT,
     })

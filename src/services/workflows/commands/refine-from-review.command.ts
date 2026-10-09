@@ -5,7 +5,8 @@ import {
   type WorkflowGenerationRuntimeDependencies,
 } from './base-command'
 import { useProjectStore } from '../../../stores/project-store'
-import { resolvePromptTemplate } from '../../prompt-templates'
+import { resolvePromptTemplate, type PromptTemplate } from '../../prompt-templates'
+import { promptLanguageText } from '../../prompt-language'
 import { ChapterPromptBuilder } from '../../prompts/prompt-builder'
 import { ipc } from '../../ipc-client'
 import { requireIpcSuccess } from '../../ipc-result'
@@ -221,15 +222,12 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
     const writingLanguage = workflowWritingLanguage(context)
 
     callbacks.log(text(
-      '正在根据已确认的审稿项精准修复...',
+      '正在根据已确认的审稿项进行修稿...',
       'Revising from the confirmed review checklist...',
     ))
 
-    const template = await resolvePromptTemplate('refine_from_review', projectSession, writingLanguage)
-    if (!template) throw new Error(text('未找到审稿修复模板', 'The review-based revision template was not found.'))
-
-    // 修复补丁必须与审稿所依据的事实源一致：注入已定稿前文事实与角色状态，
-    // 让模型在产出补丁时自查是否制造新的跨章矛盾。
+    // 修复必须与审稿所依据的事实源一致：注入已定稿前文事实与角色状态，
+    // 让模型在修稿时自查是否制造新的跨章矛盾。
     callbacks.log(text(
       '  读取已定稿连续性事实与角色状态...',
       '  Reading finalized continuity facts and character states...',
@@ -239,17 +237,16 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
       readCharacterStates(projectSession, writingLanguage),
     ])
 
-    const confirmedReviewBrief = renderHumanConfirmedReviewBrief(confirmedReview, writingLanguage)
+    // 两种修稿模式：总体修稿指导非空 → 全篇修稿（整章修订，可重锚时间线）；
+    // 留空 → 定点补丁（机械只动被点名的原文）。模板在源稿守卫之前解析，
+    // 保持「模板加载窗口内草稿变化」的两次读取防护时序不变。
+    // 两种模式共用「审稿驱动修稿」模板：模板内的模式切换变量决定输出合同
+    // （整章正文 vs 补丁 JSON），两个模板同键，只有一份可编辑、只有一个覆盖点。
+    const wholeChapterMode = Boolean(confirmedReview.authorGuidance.trim())
+    const template = await resolvePromptTemplate('refine_from_review', projectSession, writingLanguage)
+    if (!template) throw new Error(text('未找到审稿修复模板', 'The review-based revision template was not found.'))
 
-    const promptBuilder = new ChapterPromptBuilder(template, writingLanguage)
-      .withReviewReport(confirmedReviewBrief)
-      .withDraftContent(this.params.draftContent)
-      .withGlobalGuidance(novelConfig.globalGuidance || '')
-      .withGlobalSummary(contextSummary)
-      .withCharacterStates(characterStates)
-      // The brief already contains the confirmed author guidance. Do not let
-      // a transient UI field bypass the persisted confirmation snapshot.
-      .withUserRefinePrompt('')
+    const confirmedReviewBrief = renderHumanConfirmedReviewBrief(confirmedReview, writingLanguage)
 
     const sourceDraft = confirmedReview.sourceDraft
     const currentDraft = sourceDraft
@@ -276,48 +273,39 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
       ))
     }
 
-    // 补丁 JSON 是结构化数据：续写拼接（append-visible-text）会插入换行、
-    // 破坏 JSON，因此这里单次请求 + fail-closed。
-    const completion = await this.callLLMResult(
-      promptBuilder.build(),
-      promptBuilder.getSystemRole(),
-      callbacks,
-      { purpose: 'refine-from-review', reasoningStage: 'review', writingSkillStage: 'refinement' },
-      context,
-    )
-    callbacks.log(text(
-      `  生成结束：${finishReasonPhrase(completion.finishReason, text)}`,
-      `  Generation finished: ${finishReasonPhrase(completion.finishReason, text)}`,
-    ))
-    if (completion.finishReason !== 'stop') {
-      throw this.createIncompleteCompletionError(completion.finishReason)
-    }
-    const raw = completion.content
-    this.assertNotCancelled(context)
-
-    // 定点补丁：一条审稿项一个 find/replace，逐字匹配应用；未命中即跳过。
-    // 修复范围被机械限定在审稿项覆盖的原文上，不再整章重写。
-    const patches = parseSpotPatches(this.stripThinkingTags(raw))
-    if (patches.length === 0) {
-      throw new Error(text(
-        '审稿修复未产出有效补丁（应为 {"patches":[{"find","replace"}]} JSON）。'
-          + '若自定义过「审稿驱动修稿」模板，请在模板管理中恢复默认后重试。',
-        'The review-based revision produced no valid patches (expected {"patches":[{"find","replace"}]} JSON). '
-          + 'If the refine-from-review template was customized, restore its default in template management and retry.',
+    // 两种修稿模式：总体修稿指导非空 → 全篇修稿（整章修订，可重锚时间线）；
+    // 留空 → 定点补丁（机械只动被点名的原文）。两种模式共享源稿守卫与确定性防护。
+    let cleanRefined: string
+    if (wholeChapterMode) {
+      callbacks.log(text(
+        '  全篇修稿模式：总体修稿指导将驱动整章修订。',
+        '  Whole-chapter mode: the overall revision guidance drives a full-chapter revision.',
       ))
+      cleanRefined = await this.reviseWholeChapter(
+        { context, callbacks },
+        confirmedReview,
+        {
+          template,
+          novelConfig,
+          writingLanguage,
+          contextSummary,
+          characterStates,
+          confirmedReviewBrief,
+        },
+      )
+    } else {
+      cleanRefined = await this.reviseBySpotPatches(
+        { context, callbacks },
+        {
+          template,
+          novelConfig,
+          writingLanguage,
+          contextSummary,
+          characterStates,
+          confirmedReviewBrief,
+        },
+      )
     }
-    const applied = applySpotPatches(this.params.draftContent, patches)
-    callbacks.log(text(
-      `  定点修复：生成 ${patches.length} 处修改，成功应用 ${applied.applied} 处，未匹配原文跳过 ${applied.missed} 处`,
-      `  Spot fix: ${patches.length} edits proposed, ${applied.applied} applied, ${applied.missed} skipped (no match)`,
-    ))
-    if (applied.applied === 0) {
-      throw new Error(text(
-        '所有补丁都未匹配到原文，未生成修订稿；请重新执行 AI 审稿后再试。',
-        'No patch matched the draft text, so no revision was created. Run AI review again and retry.',
-      ))
-    }
-    const cleanRefined = applied.text
     assertMateriallyCompleteRevision(
       this.params.draftContent,
       cleanRefined,
@@ -387,5 +375,123 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
       `Review-based revision complete (${countDraftUnits(cleanRefined)} words); revision r${revIndex} is ready.`,
     ))
     return cleanRefined
+  }
+
+  /**
+   * 全篇修稿模式：总体修稿指导非空时按整章修订执行。这是 fork.E 之前
+   * 「审稿驱动修稿」的原始通道（refine_from_review 模板输出整章正文），
+   * 在此恢复并与定点补丁模式共存；额外注入已定稿前文事实与角色状态，
+   * 使整章修订能自查是否制造新的跨章矛盾。需要重锚时间线、改动未被点名
+   * 段落等整章级修改只能由本模式完成。
+   */
+  private async reviseWholeChapter(
+    { context, callbacks }: Pick<CommandExecuteParams, 'context' | 'callbacks'>,
+    confirmedReview: HumanConfirmedReviewSnapshot,
+    deps: {
+      template: PromptTemplate
+      novelConfig: { globalGuidance?: string; wordsPerChapter: number; writingStyle?: string }
+      writingLanguage: 'zh-CN' | 'en-US'
+      contextSummary: string
+      characterStates: string
+      confirmedReviewBrief: string
+    },
+  ): Promise<string> {
+    const template = deps.template
+
+    const guidance = confirmedReview.authorGuidance.trim()
+    const promptBuilder = new ChapterPromptBuilder(template, deps.writingLanguage)
+      .withReviewReport(deps.confirmedReviewBrief)
+      .withDraftContent(this.params.draftContent)
+      .withGlobalGuidance(deps.novelConfig.globalGuidance || '')
+      .withGlobalSummary(deps.contextSummary)
+      .withCharacterStates(deps.characterStates)
+      // 已确认的总体修稿指导经快照持久化，既是全篇模式的驱动，也写入修订记录。
+      .withUserRefinePrompt(promptLanguageText(
+        deps.writingLanguage,
+        `【全篇修稿指导（最高优先级，约束整章全局）】\n${guidance}`,
+        `[Whole-chapter revision guidance — highest priority]\n${guidance}`,
+      ))
+
+    // 整章文本可安全使用续写拼接（append-visible-text）；JSON 补丁才需要单次请求。
+    const refined = await this.callLLMWithBoundedCompletion(
+      promptBuilder.build(),
+      promptBuilder.getSystemRole(),
+      callbacks,
+      { mode: 'append-visible-text', maxContinuations: 3 },
+      { purpose: 'refine-from-review', reasoningStage: 'review', writingSkillStage: 'refinement' },
+      context,
+    )
+    this.assertNotCancelled(context)
+    return this.stripThinkingTags(refined).trim()
+  }
+
+  /**
+   * 定点补丁模式（默认）：总体修稿指导留空、仅勾选审稿项时执行。
+   * 补丁 JSON 是结构化数据：续写拼接会插入换行、破坏 JSON，因此单次请求 + fail-closed。
+   */
+  private async reviseBySpotPatches(
+    { context, callbacks }: Pick<CommandExecuteParams, 'context' | 'callbacks'>,
+    deps: {
+      template: PromptTemplate
+      novelConfig: { globalGuidance?: string }
+      writingLanguage: 'zh-CN' | 'en-US'
+      contextSummary: string
+      characterStates: string
+      confirmedReviewBrief: string
+    },
+  ): Promise<string> {
+    const text = (zhCNText: string, enUSText: string) => workflowUiText(context, zhCNText, enUSText)
+    const template = deps.template
+
+    const promptBuilder = new ChapterPromptBuilder(template, deps.writingLanguage)
+      .withReviewReport(deps.confirmedReviewBrief)
+      .withDraftContent(this.params.draftContent)
+      .withGlobalGuidance(deps.novelConfig.globalGuidance || '')
+      .withGlobalSummary(deps.contextSummary)
+      .withCharacterStates(deps.characterStates)
+      // The brief already contains the confirmed author guidance. Do not let
+      // a transient UI field bypass the persisted confirmation snapshot.
+      .withUserRefinePrompt('')
+
+    const completion = await this.callLLMResult(
+      promptBuilder.build(),
+      promptBuilder.getSystemRole(),
+      callbacks,
+      { purpose: 'refine-from-review', reasoningStage: 'review', writingSkillStage: 'refinement' },
+      context,
+    )
+    callbacks.log(text(
+      `  生成结束：${finishReasonPhrase(completion.finishReason, text)}`,
+      `  Generation finished: ${finishReasonPhrase(completion.finishReason, text)}`,
+    ))
+    if (completion.finishReason !== 'stop') {
+      throw this.createIncompleteCompletionError(completion.finishReason)
+    }
+    const raw = completion.content
+    this.assertNotCancelled(context)
+
+    // 定点补丁：一条审稿项一个 find/replace，逐字匹配应用；未命中即跳过。
+    // 修复范围被机械限定在审稿项覆盖的原文上，不再整章重写。
+    const patches = parseSpotPatches(this.stripThinkingTags(raw))
+    if (patches.length === 0) {
+      throw new Error(text(
+        '审稿修复未产出有效补丁（应为 {"patches":[{"find","replace"}]} JSON）。'
+          + '若自定义过「审稿驱动修稿」模板，请在模板管理中恢复默认后重试。',
+        'The review-based revision produced no valid patches (expected {"patches":[{"find","replace"}]} JSON). '
+          + 'If the refine-from-review template was customized, restore its default in template management and retry.',
+      ))
+    }
+    const applied = applySpotPatches(this.params.draftContent, patches)
+    callbacks.log(text(
+      `  定点修复：生成 ${patches.length} 处修改，成功应用 ${applied.applied} 处，未匹配原文跳过 ${applied.missed} 处`,
+      `  Spot fix: ${patches.length} edits proposed, ${applied.applied} applied, ${applied.missed} skipped (no match)`,
+    ))
+    if (applied.applied === 0) {
+      throw new Error(text(
+        '所有补丁都未匹配到原文，未生成修订稿；请重新执行 AI 审稿后再试。',
+        'No patch matched the draft text, so no revision was created. Run AI review again and retry.',
+      ))
+    }
+    return applied.text
   }
 }

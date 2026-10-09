@@ -630,7 +630,7 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
       "purpose": "本章主角最想解决的一件事",
       "characters": ["本章互动的要人A", "要人B"],
       "relationships": [{ "from": "要人A", "to": "要人B", "relation": "本章可确认的关系；无则空数组" }],
-      "keyEvents": "主角做了什么，遭遇了什么反转，金手指怎么用的。100字左右具体说明",
+      "keyEvents": ["每项一个不可逆事件节拍：主角做了什么、遭遇什么反转、金手指怎么用，含因果与结果（共2-6项，每项20-50字）"],
       "suspenseHook": "一句话说明结尾留了什么悬念"
     },
     {
@@ -640,7 +640,7 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 }
 
 要求：
-- 每章的 keyEvents 控制在 100-150 字以内，信息密度必须极高。
+- keyEvents 必须是字符串数组：每项一个节拍，共 2-6 项，总字数 100-150 字，信息密度必须极高；审稿会把每一项冻结为一条独立验收目标，一段式长文会导致目标无法逐项核对。
 - 每个对象必须包含完整的 chapterNumber、title、role、purpose、characters、relationships、keyEvents、suspenseHook；relationships 仅写本章可确认的角色关系，无则输出空数组。
 - 仅给出最终的 JSON 文本，不要任何客套解释、分析、计划、Markdown 或代码块。
 
@@ -707,7 +707,7 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
       "purpose": "本章主角最想解决的一件事",
       "characters": ["本章互动的要人A", "要人B"],
       "relationships": [{ "from": "要人A", "to": "要人B", "relation": "本章可确认的关系；无则空数组" }],
-      "keyEvents": "具体发生了什么，金手指怎么运作的。100字左右",
+      "keyEvents": ["每项一个不可逆事件节拍：具体发生了什么、金手指怎么运作，含因果与结果（共2-6项，每项20-50字）"],
       "suspenseHook": "结尾留的钩子"
     }
   ]
@@ -715,6 +715,7 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 
 要求：
 - 严格遵循上下文连贯，不要前后矛盾。
+- keyEvents 必须是字符串数组：每项一个节拍，共 2-6 项，总字数 100-150 字；审稿会把每一项冻结为一条独立验收目标。
 - 每个对象必须包含完整的 chapterNumber、title、role、purpose、characters、relationships、keyEvents、suspenseHook；relationships 仅写本章可确认的角色关系，无则输出空数组。
 - 仅给出最终的 JSON 文本，不要解释、分析、计划、Markdown 或代码块。
 
@@ -1607,12 +1608,12 @@ severity 取值：error=严重违规强烈建议修复, warning=轻微不一致�
   "role": "本章在全书中的角色（起、承、转、合、伏笔、高潮、过渡 等）",
   "purpose": "本章主角最想解决的核心问题（一句话）",
   "characters": ["本章出场的重要角色名"],
-  "keyEvents": "本章核心事件概述（100-150字，包含因果关系和结果）",
+  "keyEvents": ["本章核心事件，每项一个节拍，包含因果关系和结果（共2-6项，总100-150字）"],
   "suspenseHook": "章末留下的悬念或钩子（一句话）"
 }
 
 要求：
-1. keyEvents 必须基于正文实际内容提取，不可臆造。
+1. keyEvents 必须是字符串数组，每项一个基于正文实际内容的事件节拍，不可臆造。
 2. characters 只列主要互动角色名（3-5个），不要列龙套。
 3. role 从正文的叙事功能判断（建置/发展/转折/高潮/结局/过渡等）。
 4. 仅输出 JSON，不要任何额外文字。`,

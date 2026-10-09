@@ -969,15 +969,15 @@ function ReviewReportSession({
             <>
               <div>
                 <Label htmlFor="review-author-guidance">
-                  {text('总体修稿指导（可选）', 'Overall revision guidance (optional)')}
+                  {text('总体修稿指导（可选，填写后按整章全篇修稿）', 'Overall revision guidance (optional; drives a whole-chapter revision when filled)')}
                 </Label>
                 <Textarea
                   id="review-author-guidance"
                   value={authorGuidance}
                   onChange={(event) => setAuthorGuidance(event.target.value)}
                   placeholder={text(
-                    '例如：优先修复角色动机的前后不一致，保持本章克制的叙事节奏。',
-                    'For example: prioritize inconsistent character motivation while keeping this chapter’s restrained pace.',
+                    '填写此项将触发整章全篇修稿（可重锚时间线、改写未点名的段落）；留空则按已选审稿项执行定点补丁修复（只改问题区）。',
+                    'Filling this drives a full-chapter revision (can re-anchor timelines or rewrite unflagged passages); leaving it empty applies localized spot patches to selected items only.',
                   )}
                 />
               </div>

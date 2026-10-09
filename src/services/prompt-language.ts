@@ -354,7 +354,7 @@ Produce a complete outline made of structural turning points rather than chapter
 4. End every chapter with a concrete variable that creates forward pressure.
 
 [JSON output contract]
-Return exactly one object with a blueprints array. Every item must contain chapterNumber, title, role, purpose, characters, relationships, keyEvents, and suspenseHook. relationships contains only relationships established in that chapter and is [] when empty. keyEvents must concisely state actions, reversals, consequences, and relevant use of the central advantage.
+Return exactly one object with a blueprints array. Every item must contain chapterNumber, title, role, purpose, characters, relationships, keyEvents, and suspenseHook. relationships contains only relationships established in that chapter and is [] when empty. keyEvents must be an array of 2-6 non-empty strings, one irreversible story beat per item covering actions, reversals, consequences, and relevant use of the central advantage (100-150 characters in total); the review freezes each item into a separate checklist goal.
 Return JSON only, with no Markdown, preface, analysis, plan, code fence, or reasoning.
 
 [Author pacing and style guidance — highest priority when present]
@@ -384,6 +384,7 @@ Each line is "Chapter N — Title: key events (goal: ...; hook: ...)":
 4. Carry forward the last chapter's goal and hook: advance from its hook, but do not re-run a goal it already achieved, and do not restate the previous hook or goal in place unless the author's facts explicitly require it.
 5. Give every chapter a material event change; do not add filler.
 6. Return exactly one JSON object with a blueprints array and no analysis, plan, explanation, Markdown, or code fence.
+7. Output keyEvents as an array of 2-6 non-empty strings, one irreversible story beat per item covering actions, reversals, consequences, and relevant use of the central advantage (100-150 characters in total); the review freezes each item into a separate checklist goal.
 
 [Author pacing and style guidance]
 {{pacing_guidance}}`,
@@ -832,7 +833,7 @@ The runtime appends the authoritative immutable JSON contract. Follow that contr
 [Requirements]
 1. Base every event, character, relationship, and hook on the supplied manuscript; do not invent facts.
 2. Preserve every character name exactly as written.
-3. Describe this chapter's narrative function, immediate goal, causal events, and final hook concisely.
+3. Describe this chapter's narrative function, immediate goal, causal events, and final hook concisely. Output keyEvents as an array of 2-6 non-empty strings, one irreversible story beat per item grounded in the supplied manuscript (100-150 characters in total).
 4. The runtime appends the final immutable JSON contract; follow it over any alternative schema.
 
 Output JSON only, with no Markdown, explanation, or reasoning.`,
