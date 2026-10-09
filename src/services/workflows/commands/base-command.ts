@@ -6,7 +6,7 @@ import type { LLMFinishReason, ProjectSessionContext } from '../../../shared/ipc
  * 把 finishReason 枚举转成面向作者的可读短语，替代内部枚举直出。
  * phrase 是调用方已绑定 locale 的双语文案函数。
  */
-function finishReasonPhrase(
+export function finishReasonPhrase(
   reason: LLMFinishReason,
   phrase: (zhCNText: string, enUSText: string) => string,
 ): string {

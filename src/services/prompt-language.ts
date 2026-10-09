@@ -622,27 +622,39 @@ Output exactly one JSON object in this shape:
 severity must be error, warning, or pass. The root object allows only items; never output summary, goalReviews, or any other field. Return 1–10 items total; do not add pass items merely to cover categories, and never repeat the same issue. Keep each quote within 160 characters and each description within 200 characters. quote may be omitted only for pass items. Do not output Markdown, explanation, or reasoning.`,
   },
   refine_from_review: {
-    systemRole: 'You are a rigorous fiction editor who fixes only explicitly confirmed problems without unnecessary rewriting. Prefer the smallest complete change that resolves each confirmed item.',
-    content: `Revise the chapter using only the confirmed review checklist.
+    systemRole: 'You are a rigorous fiction editor. Produce localized patches from the human-confirmed review items only, preserving author facts, character voice, and every valid passage the review did not flag.',
+    content: `Fix the problems listed in the [Review report] with localized patches, emitted as patch JSON.
 
-[Confirmed review checklist]
+[Review report]
 {{review_report}}
 
-[Source manuscript]
+[Manuscript to revise]
 {{draft_content}}
+
+[Finalized prior-chapter facts (patches must not contradict these)]
+{{global_summary}}
+
+[Character states (patches must not contradict these)]
+{{character_states}}
 
 [Project-wide writing guidance]
 {{global_guidance}}
 
 [Revision principles]
-1. Resolve every confirmed item one by one.
-2. Do not polish or rewrite material that the confirmed checklist does not address.
-3. Preserve the manuscript's voice, pacing, facts, and approximate length.
-4. Make the smallest change that completely resolves each confirmed problem.`,
-    systemSuffix: `[Confirmed author guidance — highest priority when present]
+1. Fix only the problems explicitly named in the review report; one patch per review item, resolved one by one.
+2. find must be a verbatim contiguous excerpt copied from [Manuscript to revise] (at least 6 characters, preferably a whole sentence); replace is the fixed text.
+3. Never touch anything the review report does not mention; do not reorder paragraphs or polish the whole chapter.
+4. Minimal change: the smaller the edit the better, fix only the problem itself, and keep the original voice and approximate length.
+5. To insert a new sentence, use a nearby sentence from the manuscript as the find anchor and set replace to that anchor sentence plus the new content.
+6. Patches must not contradict [Finalized prior-chapter facts] or [Character states]; if a review item conflicts with this chapter's fact sources and cannot be fixed safely, skip it instead of forcing a change.`,
+    systemSuffix: `* [Author guidance for this step — highest priority when present]
 {{user_refine_prompt}}
 
-Output the complete revised chapter as plain prose only. Do not include a preface, explanation, Markdown, analysis, or screenplay formatting. Separate every paragraph with one blank line.`,
+Output exactly this JSON shape and nothing else outside it:
+
+{"patches":[{"find":"excerpt copied verbatim from the manuscript to revise","replace":"fixed text"}]}
+
+Output patch JSON only; copying find verbatim is mandatory, and any paraphrase, abbreviation, or rewrite of find causes the patch to be discarded.`,
   },
   generate_chapter_notes: {
     systemRole: 'You are a professional fiction structure analyst. Use concise phrases, explicit categories, and concrete evidence from the chapter.',

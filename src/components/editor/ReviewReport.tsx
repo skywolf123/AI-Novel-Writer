@@ -34,9 +34,11 @@ import { resolveWritingLanguage, type WritingLanguage } from '../../shared/writi
 import {
   defaultReviewDecision,
   normalizeReviewSeverity,
+  parseReviewCarryover,
   parseReviewReport,
   type ReviewIssue,
 } from '../../shared/review-report'
+import { evidenceKey } from '../../shared/review-convergence'
 import {
   createHumanConfirmedReviewSnapshot,
   hasIncludedReviewItems,
@@ -242,6 +244,8 @@ function ReviewReportSession({
       : undefined,
   ))
   const parsedReport = parseReviewReport(reportText, text('综合检查', 'General review'))
+  const carryover = parseReviewCarryover(reportText)
+  const recurringKeySet = new Set(carryover?.recurringKeys ?? [])
   const [items, setItems] = useState<EditableReviewItem[]>(() => (
     editableItemsFromReview(parsedReport.issues, initialSnapshot)
   ))
@@ -708,6 +712,38 @@ function ReviewReportSession({
           </div>
         )}
 
+        {/* 跨轮收敛度量（如有上一轮 AI 审稿） */}
+        {carryover && carryover.items.length > 0 && (
+          <div className="mb-4 rounded-lg border p-3 text-xs space-y-2" style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)' }}>
+            <div className="font-medium text-[var(--color-text)]">
+              {text(
+                `与上一轮审稿（r${carryover.sourceReviewIndex}）收敛情况：已修复 ${carryover.resolvedCount} 项，原文未动 ${carryover.recurringCount} 项`,
+                `Convergence vs previous review (r${carryover.sourceReviewIndex}): ${carryover.resolvedCount} resolved, ${carryover.recurringCount} still verbatim`,
+              )}
+            </div>
+            {carryover.items.some(item => item.status === 'recurring') && (
+              <div className="space-y-1">
+                {carryover.items.filter(item => item.status === 'recurring').map((item, index) => (
+                  <div key={index} className="flex items-start gap-2">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-yellow-500/20 text-[var(--color-warning-text)] shrink-0">
+                      {text('未修复', 'Unfixed')}
+                    </span>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>
+                      〔{item.category}〕{item.quote}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ color: 'var(--color-text-muted)' }}>
+              {text(
+                '判定依据：上一轮引用原文是否仍存在于当前正文（视为已修复 ≠ 语义已解决）。',
+                'Basis: whether the previous quote still appears verbatim in the current draft ("resolved" is evidence-based, not semantic).',
+              )}
+            </div>
+          </div>
+        )}
+
         {goalReview && (
           <p className="mb-4 text-xs text-[var(--color-text-muted)]">
             {goalReview.coverage === 'complete'
@@ -738,6 +774,9 @@ function ReviewReportSession({
                     const meta = SEVERITY_META[item.severity]
                     const copy = severityCopy(item.severity, text)
                     const isPass = item.severity === 'pass'
+                    const reportedLastRound = !item.goalId
+                      && !!item.quote
+                      && recurringKeySet.has(evidenceKey(item.category, item.quote))
                     const goal = goalReview?.items.find(goal => goal.id === item.goalId)
                     const isEmptyAuthorIssue = item.origin === 'author' && !item.description.trim()
                     return (
@@ -825,6 +864,17 @@ function ReviewReportSession({
                                   [{copy.actionLabel}]
                                 </span>
                               </div>
+                            )}
+                            {/* 证据键命中上一轮报告：本轮仍在报 → 修不掉的硬问题 */}
+                            {reportedLastRound && (
+                              <p className="text-[0.7rem]">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-yellow-500/20 text-[var(--color-warning-text)]">
+                                  {text('上轮已报', 'Reported last round')}
+                                </span>
+                                <span className="ml-2 text-[var(--color-text-muted)]">
+                                  {text('与上一轮审稿同一条原文引用。', 'Same quote as the previous review round.')}
+                                </span>
+                              </p>
                             )}
                             {item.sourceChapter && (
                               <p className="text-[0.7rem] text-[var(--color-text-muted)]">

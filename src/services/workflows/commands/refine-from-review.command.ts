@@ -1,4 +1,9 @@
-import { BaseWorkflowCommand, CommandExecuteParams, type WorkflowGenerationRuntimeDependencies } from './base-command'
+import {
+  BaseWorkflowCommand,
+  CommandExecuteParams,
+  finishReasonPhrase,
+  type WorkflowGenerationRuntimeDependencies,
+} from './base-command'
 import { useProjectStore } from '../../../stores/project-store'
 import { resolvePromptTemplate } from '../../prompt-templates'
 import { ChapterPromptBuilder } from '../../prompts/prompt-builder'
@@ -16,6 +21,8 @@ import { assertMateriallyCompleteRevision } from './refinement-completeness'
 import { assertNoExactDuplicateParagraphs } from '../../../shared/duplicate-spans'
 import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
+import { readCharacterStates, readFinalizedHistory } from '../continuity-context'
+import { applySpotPatches, parseSpotPatches } from '../../../shared/spot-patches'
 import {
   hasIncludedReviewItems,
   parseHumanConfirmedReviewSnapshot,
@@ -221,12 +228,25 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
     const template = await resolvePromptTemplate('refine_from_review', projectSession, writingLanguage)
     if (!template) throw new Error(text('未找到审稿修复模板', 'The review-based revision template was not found.'))
 
+    // 修复补丁必须与审稿所依据的事实源一致：注入已定稿前文事实与角色状态，
+    // 让模型在产出补丁时自查是否制造新的跨章矛盾。
+    callbacks.log(text(
+      '  读取已定稿连续性事实与角色状态...',
+      '  Reading finalized continuity facts and character states...',
+    ))
+    const [contextSummary, characterStates] = await Promise.all([
+      readFinalizedHistory(this.params.chapterNumber ?? 0, projectSession, writingLanguage),
+      readCharacterStates(projectSession, writingLanguage),
+    ])
+
     const confirmedReviewBrief = renderHumanConfirmedReviewBrief(confirmedReview, writingLanguage)
 
     const promptBuilder = new ChapterPromptBuilder(template, writingLanguage)
       .withReviewReport(confirmedReviewBrief)
       .withDraftContent(this.params.draftContent)
       .withGlobalGuidance(novelConfig.globalGuidance || '')
+      .withGlobalSummary(contextSummary)
+      .withCharacterStates(characterStates)
       // The brief already contains the confirmed author guidance. Do not let
       // a transient UI field bypass the persisted confirmation snapshot.
       .withUserRefinePrompt('')
@@ -256,16 +276,48 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
       ))
     }
 
-    const refined = await this.callLLMWithBoundedCompletion(
+    // 补丁 JSON 是结构化数据：续写拼接（append-visible-text）会插入换行、
+    // 破坏 JSON，因此这里单次请求 + fail-closed。
+    const completion = await this.callLLMResult(
       promptBuilder.build(),
       promptBuilder.getSystemRole(),
       callbacks,
-      { mode: 'append-visible-text', maxContinuations: 3 },
       { purpose: 'refine-from-review', reasoningStage: 'review', writingSkillStage: 'refinement' },
       context,
     )
+    callbacks.log(text(
+      `  生成结束：${finishReasonPhrase(completion.finishReason, text)}`,
+      `  Generation finished: ${finishReasonPhrase(completion.finishReason, text)}`,
+    ))
+    if (completion.finishReason !== 'stop') {
+      throw this.createIncompleteCompletionError(completion.finishReason)
+    }
+    const raw = completion.content
     this.assertNotCancelled(context)
-    const cleanRefined = this.stripThinkingTags(refined).trim()
+
+    // 定点补丁：一条审稿项一个 find/replace，逐字匹配应用；未命中即跳过。
+    // 修复范围被机械限定在审稿项覆盖的原文上，不再整章重写。
+    const patches = parseSpotPatches(this.stripThinkingTags(raw))
+    if (patches.length === 0) {
+      throw new Error(text(
+        '审稿修复未产出有效补丁（应为 {"patches":[{"find","replace"}]} JSON）。'
+          + '若自定义过「审稿驱动修稿」模板，请在模板管理中恢复默认后重试。',
+        'The review-based revision produced no valid patches (expected {"patches":[{"find","replace"}]} JSON). '
+          + 'If the refine-from-review template was customized, restore its default in template management and retry.',
+      ))
+    }
+    const applied = applySpotPatches(this.params.draftContent, patches)
+    callbacks.log(text(
+      `  定点修复：生成 ${patches.length} 处修改，成功应用 ${applied.applied} 处，未匹配原文跳过 ${applied.missed} 处`,
+      `  Spot fix: ${patches.length} edits proposed, ${applied.applied} applied, ${applied.missed} skipped (no match)`,
+    ))
+    if (applied.applied === 0) {
+      throw new Error(text(
+        '所有补丁都未匹配到原文，未生成修订稿；请重新执行 AI 审稿后再试。',
+        'No patch matched the draft text, so no revision was created. Run AI review again and retry.',
+      ))
+    }
+    const cleanRefined = applied.text
     assertMateriallyCompleteRevision(
       this.params.draftContent,
       cleanRefined,

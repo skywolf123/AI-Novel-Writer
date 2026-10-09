@@ -54,7 +54,7 @@ const CONFIRMED_REVIEW_CONTENT = JSON.stringify({
     chapterNumber: 1,
     version: 1,
     status: 'draft',
-    content: '原稿',
+    content: '原稿正文段落。'.repeat(40),
   },
   summary: '需要修复连续性问题。',
   authorGuidance: '',
@@ -1101,7 +1101,7 @@ describe('workflow mutation failure boundaries', () => {
     })],
     ['review refinement', () => new RefineFromReviewCommand({
       draftPath: 'vela://draft/1',
-      draftContent: '原稿',
+      draftContent: '原稿正文段落。'.repeat(40),
       confirmedReviewContent: CONFIRMED_REVIEW_CONTENT,
       reviewSourceId: 7,
       chapterNumber: 1,
@@ -1112,7 +1112,7 @@ describe('workflow mutation failure boundaries', () => {
         return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
       }
       if (channel === 'db:draft-get-full') {
-        return { id: 1, chapterNumber: 1, version: 1, status: 'draft', content: '原稿' }
+        return { id: 1, chapterNumber: 1, version: 1, status: 'draft', content: '原稿正文段落。'.repeat(40) }
       }
       if (channel === 'db:review-get-full') {
         return {
@@ -1124,7 +1124,7 @@ describe('workflow mutation failure boundaries', () => {
             chapterNumber: 1,
             version: 1,
             status: 'draft',
-            content: '原稿',
+            content: '原稿正文段落。'.repeat(40),
           },
         }
       }
@@ -1136,7 +1136,16 @@ describe('workflow mutation failure boundaries', () => {
     })
     stubVelaIpc(invoke)
     const command = makeCommand()
-    stubLlm(command, '修订正文')
+    stubLlm(command, JSON.stringify({
+      patches: [{ find: '原稿正文段落。', replace: '修订正文段落。' }],
+    }))
+    // 审稿修复走 callLLMResult（单次结构化请求）；补丁必须是合法 JSON。
+    vi.spyOn(command as unknown as {
+      callLLMResult: () => Promise<{ content: string; finishReason: string }>
+    }, 'callLLMResult').mockResolvedValue({
+      content: JSON.stringify({ patches: [{ find: '原稿正文段落。', replace: '修订正文段落。' }] }),
+      finishReason: 'stop',
+    })
 
     await expect(command.execute({
       step: {},

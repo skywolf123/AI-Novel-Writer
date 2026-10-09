@@ -70,6 +70,16 @@ const PASSING_REVIEW_JSON = JSON.stringify({
   items: [{ category: '剧情连贯性', severity: 'pass', description: '未发现矛盾' }],
 })
 const GOALS_REVIEW_JSON = JSON.stringify({ goalReviews: [] })
+/** 审稿修复现以定点补丁合同取证；find 必须逐字取自待修稿。 */
+const PATCH_JSON = JSON.stringify({
+  patches: [{ find: '原稿正文。原稿正文。', replace: '修订正文。修订正文。' }],
+})
+const PATCH_JSON_EN = JSON.stringify({
+  patches: [{
+    find: 'Original reviewed chapter.',
+    replace: 'Corrected reviewed chapter.',
+  }],
+})
 
 /**
  * 审稿分片路由：目标分片使用独立的 goalReviews 合同响应（不计入调用方
@@ -235,6 +245,8 @@ function successfulRevisionIpc(options: {
     if (channel === 'db:draft-get-full') {
       return { ...CONFIRMED_SOURCE_DRAFT, content: options.currentDraftContent ?? CONFIRMED_SOURCE_DRAFT.content }
     }
+    // 审稿修复在生成前读取已定稿事实与角色状态（修复补丁的事实源）。
+    if (channel === 'db:continuity-list-before' || channel === 'db:character-get-all') return []
     if (channel === 'db:review-get-full') {
       return {
         id: reviewId,
@@ -403,7 +415,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
     expect(observed.get('refine-draft')).toContain('Revise the chapter manuscript')
     expect(observed.get('review-chapter-continuity')).toContain("Review the chapter's factual thread")
     expect(observed.get('review-chapter-goals')).toContain('chapter goal checklist')
-    expect(observed.get('refine-from-review')).toContain('Revise the chapter using only the confirmed review checklist')
+    expect(observed.get('refine-from-review')).toContain('Fix the problems listed in the [Review report] with localized patches')
     for (const request of observed.values()) {
       expect(request).not.toContain('你是一位功力深厚的文学编辑')
       expect(request).not.toContain('你是一位严谨的小说质量监督编辑')
@@ -682,9 +694,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
 describe('RefineFromReviewCommand bounded visible completion', () => {
   it('uses the frozen English UI locale for visible confirmed-review logs and the diff tab', async () => {
     const source = 'Original reviewed chapter. '.repeat(100)
-    const revision = 'Corrected reviewed chapter. '.repeat(100)
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
-      .mockResolvedValue({ content: revision, finishReason: 'stop' })
+      .mockResolvedValue({ content: PATCH_JSON_EN, finishReason: 'stop' })
     const persistedConfirmation = confirmedReviewContent({
       sourceDraft: { ...CONFIRMED_SOURCE_DRAFT, content: source },
     })
@@ -748,9 +759,8 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
     if (!confirmedSnapshot) throw new Error('Expected a valid confirmed-review fixture')
     const previewBrief = renderHumanConfirmedReviewBrief(confirmedSnapshot, 'en-US')
     const source = 'Original reviewed chapter. '.repeat(100)
-    const revision = 'Corrected reviewed chapter. '.repeat(100)
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
-      .mockResolvedValue({ content: revision, finishReason: 'stop' })
+      .mockResolvedValue({ content: PATCH_JSON_EN, finishReason: 'stop' })
     stubIpc(successfulRevisionIpc({ reviewContent: persistedConfirmation, currentDraftContent: source }))
 
     await reviewCommand(completeWithLease, source, {
@@ -774,6 +784,7 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
   it('uses the persisted confirmation row as the only refinement input, records that row on the pending revision, and preserves the draft before merge', async () => {
     const persistedConfirmation = confirmedReviewContent({
       sourceReviewId: 41,
+      sourceDraft: { ...CONFIRMED_SOURCE_DRAFT, content: '原稿正文。'.repeat(250) },
       summary: '原始 AI 总结绝不能进入修稿提示。',
       authorGuidance: '保留开头的悬念。',
       items: [
@@ -794,10 +805,14 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
       ],
     })
     const sourceDraft = '原稿正文。'.repeat(250)
-    const revision = '修订正文。'.repeat(250)
+    // 定点修复只替换补丁覆盖的原文片段，其余正文逐字保留。
+    const expectedRevision = '修订正文。修订正文。' + sourceDraft.slice('原稿正文。原稿正文。'.length)
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
-      .mockResolvedValue({ content: revision, finishReason: 'stop' })
-    const invoke = successfulRevisionIpc({ reviewContent: persistedConfirmation })
+      .mockResolvedValue({ content: PATCH_JSON, finishReason: 'stop' })
+    const invoke = successfulRevisionIpc({
+      reviewContent: persistedConfirmation,
+      currentDraftContent: sourceDraft,
+    })
     stubIpc(invoke)
 
     const begunModelIds: string[] = []
@@ -826,7 +841,7 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
       step: {},
       context: workflowContext({ generationModelId: 'grok-selected-model' }),
       callbacks: callbacks(),
-    })).resolves.toBe(revision)
+    })).resolves.toBe(expectedRevision)
 
     expect(invoke).toHaveBeenCalledWith(
       'db:review-get-full',
@@ -849,7 +864,7 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
       revisionType: 'review-fix',
       reviewSourceId: CONFIRMATION_REVIEW_ID,
       userPrompt: '保留开头的悬念。',
-      content: revision,
+      content: expectedRevision,
       expectedSource: CONFIRMED_SOURCE_DRAFT,
     })
     expect(invoke.mock.calls.some(([channel]) => (
@@ -927,9 +942,8 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
   })
 
   it('does not persist or open a review fix when the source changes during generation', async () => {
-    const revision = '修订正文。'.repeat(250)
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
-      .mockResolvedValue({ content: revision, finishReason: 'stop' })
+      .mockResolvedValue({ content: PATCH_JSON, finishReason: 'stop' })
     const invoke = successfulRevisionIpc({
       revisionResult: {
         success: false,
@@ -1032,54 +1046,54 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
     expect(invoke.mock.calls.some(([channel]) => channel === 'db:revision-replace-pending')).toBe(false)
   })
 
-  it('continues a length-limited public workflow and logs only bounded terminal evidence', async () => {
-    const source = '原稿正文。'
+  it('keeps a length-limited review fix fail-closed instead of stitching patch JSON', async () => {
+    const source = '原稿正文。'.repeat(120)
     const persistedConfirmation = confirmedReviewContent({
       sourceDraft: { ...CONFIRMED_SOURCE_DRAFT, content: source },
     })
-    const overlap = '审稿修复衔接句'.repeat(8)
-    const first = `前半修复正文。${overlap}`
-    const second = `${overlap}后半修复正文。`
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
-      .mockResolvedValueOnce({ content: first, finishReason: 'length' })
-      .mockResolvedValueOnce({ content: second, finishReason: 'stop' })
+      .mockResolvedValue({ content: '{"patches":[{"find":"原稿正文。原稿正文。","replace":"修订', finishReason: 'length' })
     const invoke = successfulRevisionIpc({ reviewContent: persistedConfirmation, currentDraftContent: source })
     stubIpc(invoke)
     const stepCallbacks = callbacks()
 
-    await expect(reviewCommand(completeWithLease, source, { confirmedReviewContent: persistedConfirmation }).execute({
+    // 补丁是结构化 JSON：截断后拼接会破坏合同，只能 fail-closed。
+    await expect(reviewCommand(completeWithLease, source, {
+      confirmedReviewContent: persistedConfirmation,
+    }).execute({
       step: {},
       context: workflowContext(),
       callbacks: stepCallbacks,
-    })).resolves.toBe(`${first}\n\n后半修复正文。`)
+    })).rejects.toThrow('AI 输出达到本次请求长度限制')
 
-    expect(completeWithLease).toHaveBeenCalledTimes(2)
-    expect(completeWithLease.mock.calls.map(([request]) => request.reasoningStage))
-      .toEqual(['review', 'review'])
-    expect(stepCallbacks.log).toHaveBeenCalledWith('  生成结束：达到输出上限')
-    expect(stepCallbacks.log).toHaveBeenCalledWith('  续写第 1 段结束：正常完成')
-    expect(stepCallbacks.log).not.toHaveBeenCalledWith(expect.stringContaining(first))
-    expect(invoke.mock.calls.filter(([channel]) => channel === 'db:revision-replace-pending')).toHaveLength(1)
+    expect(completeWithLease).toHaveBeenCalledTimes(1)
+    const logs = vi.mocked(stepCallbacks.log).mock.calls.map(([message]) => message).join('\n')
+    expect(logs).toContain('达到输出上限')
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'db:revision-replace-pending')).toHaveLength(0)
+    expect(useEditorStore.getState().tabs).toEqual([])
   })
 
-  it('keeps revision storage untouched when a stop continuation only repeats the partial revision', async () => {
-    const partial = '审稿修复正文。'.repeat(100)
-    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
-      .mockResolvedValueOnce({ content: partial, finishReason: 'length' })
-      .mockResolvedValueOnce({ content: partial, finishReason: 'stop' })
+  it('persists nothing when no patch matches the draft', async () => {
+    const source = '原稿正文。'.repeat(120)
     const persistedConfirmation = confirmedReviewContent({
-      sourceDraft: { ...CONFIRMED_SOURCE_DRAFT, content: partial },
+      sourceDraft: { ...CONFIRMED_SOURCE_DRAFT, content: source },
     })
-    const invoke = successfulRevisionIpc({ reviewContent: persistedConfirmation, currentDraftContent: partial })
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockResolvedValue({
+        content: JSON.stringify({ patches: [{ find: '完全不存在于正文的引用片段。', replace: '无所谓。' }] }),
+        finishReason: 'stop',
+      })
+    const invoke = successfulRevisionIpc({ reviewContent: persistedConfirmation, currentDraftContent: source })
     stubIpc(invoke)
 
-    await expect(reviewCommand(completeWithLease, partial, { confirmedReviewContent: persistedConfirmation }).execute({
+    await expect(reviewCommand(completeWithLease, source, {
+      confirmedReviewContent: persistedConfirmation,
+    }).execute({
       step: {},
       context: workflowContext(),
       callbacks: callbacks(),
-    })).rejects.toThrow('续写未增加新的可见正文')
+    })).rejects.toThrow('所有补丁都未匹配到原文')
 
-    expect(completeWithLease).toHaveBeenCalledTimes(2)
     expect(invoke.mock.calls.filter(([channel]) => channel === 'db:revision-replace-pending')).toHaveLength(0)
     expect(useEditorStore.getState().tabs).toEqual([])
   })
@@ -1403,5 +1417,106 @@ describe('ReviewChapterCommand reasoning stage', () => {
     expect(completeWithLease.mock.calls[0]?.[0].reasoningStage).toBe('review')
     expect(completeWithLease.mock.calls[0]?.[0].messages[1]?.content)
       .toContain('【补充写作 Skill：Review craft】')
+  })
+})
+
+describe('ReviewChapterCommand cross-round convergence', () => {
+  const REVIEWED_TEXT = '顾舟把钥匙收进抽屉，转身走出档案室。'
+
+  function convergenceIpc(
+    reviewRows: readonly { id: number; reviewIndex: number; content: string }[],
+    createParams: Array<{ content: string }>,
+  ) {
+    return vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'kb:search' || channel === 'db:character-get-all') return []
+      if (channel === 'db:project-core-get') return {}
+      if (channel === 'db:blueprint-get-all') return []
+      if (channel === 'db:blueprint-get') return null
+      if (channel === 'db:draft-get-meta') {
+        return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
+      }
+      if (channel === 'db:review-next-index') return 3
+      if (channel === 'db:review-list') return reviewRows.map(row => ({ id: row.id, reviewIndex: row.reviewIndex }))
+      if (channel === 'db:review-get-full') {
+        const row = reviewRows.find(candidate => candidate.id === args[0])
+        return row ? { id: row.id, reviewIndex: row.reviewIndex, content: row.content } : null
+      }
+      if (channel === 'db:review-create') {
+        createParams.push(args[0] as { content: string })
+        return { success: true, id: 88 }
+      }
+      throw new Error(`unexpected IPC: ${channel}`)
+    })
+  }
+
+  it('mounts a carryover block and flags findings the previous round already reported', async () => {
+    const previousItems = [{
+      category: '剧情连贯性',
+      severity: 'error',
+      description: '钥匙去向前后矛盾',
+      quote: '顾舟把钥匙收进抽屉',
+    }]
+    const previousReport = {
+      id: 42,
+      reviewIndex: 2,
+      content: JSON.stringify({ items: previousItems }),
+    }
+    const currentItems = [
+      { ...previousItems[0] },
+      { category: '角色状态', severity: 'warning', description: '新的问题', quote: '转身走出档案室' },
+    ]
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockImplementation(async request => ({
+        content: request.purpose === 'review-chapter-continuity'
+          ? JSON.stringify({ items: currentItems })
+          : PASSING_REVIEW_JSON,
+        finishReason: 'stop' as const,
+      }))
+    const createParams: Array<{ content: string }> = []
+    stubIpc(convergenceIpc([previousReport], createParams))
+
+    await chapterReviewCommand(completeWithLease, REVIEWED_TEXT).execute({
+      step: {}, context: workflowContext(), callbacks: callbacks(),
+    })
+
+    const persisted = JSON.parse(createParams[0]!.content) as {
+      carryover: {
+        sourceReviewId: number
+        sourceReviewIndex: number
+        resolvedCount: number
+        recurringCount: number
+        items: Array<{ category: string; status: string }>
+        recurringKeys: string[]
+      }
+      items: Array<{ category: string; quote?: string }>
+    }
+    expect(persisted.carryover.sourceReviewId).toBe(42)
+    expect(persisted.carryover.sourceReviewIndex).toBe(2)
+    expect(persisted.carryover.recurringCount).toBe(1)
+    expect(persisted.carryover.resolvedCount).toBe(0)
+    expect(persisted.carryover.items[0]).toMatchObject({ category: '剧情连贯性', status: 'recurring' })
+    // 上一轮同键（category + 归一化引用）在当前发现中命中 → 标记为「上轮已报」
+    expect(persisted.carryover.recurringKeys).toEqual(['剧情连贯性|顾舟把钥匙收进抽屉'])
+  })
+
+  it('skips human-confirmed snapshot rows and omits carryover on a first review', async () => {
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockResolvedValue({ content: PASSING_REVIEW_JSON, finishReason: 'stop' })
+    const createParams: Array<{ content: string }> = []
+    stubIpc(convergenceIpc([{
+      id: 51,
+      reviewIndex: 1,
+      content: JSON.stringify({
+        kind: 'human-confirmed-review',
+        items: [{ category: '剧情连贯性', severity: 'error', description: '已确认快照', quote: '顾舟把钥匙收进抽屉' }],
+      }),
+    }], createParams))
+
+    await chapterReviewCommand(completeWithLease).execute({
+      step: {}, context: workflowContext(), callbacks: callbacks(),
+    })
+
+    const persisted = JSON.parse(createParams[0]!.content) as { carryover?: unknown }
+    expect(persisted.carryover).toBeUndefined()
   })
 })
