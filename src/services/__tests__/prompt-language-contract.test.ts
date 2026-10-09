@@ -28,6 +28,7 @@ const REQUIRED_CORE_KEYS = [
   'consistency_check_logic',
   'consistency_check_narration',
   'refine_from_review',
+  'split_key_events',
   'generate_chapter_notes',
   'update_character_cards',
   'analyze_writing_style',

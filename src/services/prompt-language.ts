@@ -44,6 +44,7 @@ export const CORE_LOCALIZED_BUILTIN_PROMPT_KEYS = Object.freeze([
   'consistency_check_logic',
   'consistency_check_narration',
   'refine_from_review',
+  'split_key_events',
   'generate_chapter_notes',
   'update_character_cards',
   'analyze_writing_style',
@@ -621,6 +622,32 @@ Output exactly one JSON object in this shape:
 {"items":[{"category":"person consistency","severity":"error","quote":"exact source sentence","description":"first-person sentence inside third-person narration"}]}
 
 severity must be error, warning, or pass. The root object allows only items; never output summary, goalReviews, or any other field. Return 1–10 items total; do not add pass items merely to cover categories, and never repeat the same issue. Keep each quote within 160 characters and each description within 200 characters. quote may be omitted only for pass items. Do not output Markdown, explanation, or reasoning.`,
+  },
+  split_key_events: {
+    systemRole: 'You are a rigorous fiction-structure analyst. Your only job is to reorganize the format of the existing event description; never add, remove, or rewrite events.',
+    content: `Split the [chapter key events] below into 2-6 story beats that preserve the original meaning.
+
+[Chapter {{chapter_number}} key events]
+{{key_events}}
+
+[Task boundaries]
+- The text above is your only input; introduce no event, character, setting, date, or figure that it does not contain.
+- Do not add events, remove events, change their meaning, or write commentary into a beat.
+- Each beat is one irreversible event: who did what, the reversal, and the outcome.
+- Keep the original wording and order; only split, and add only the minimal connective wording needed.
+- If the source has fewer than 2 events, keep the complete beat and add a second beat for an outcome the source already implies.
+
+[Splitting rules]
+1. The beat count must be 2-6; when it would exceed 6, merge consecutive actions from the same scene into one beat.
+2. Each beat is 20-50 characters; all beats together stay within 900 characters.
+3. A beat must not contain a semicolon or a line break.
+
+[Output format]
+Output exactly one JSON object whose root field is only the keyEvents array:
+
+{"keyEvents":["first beat","second beat"]}
+
+Do not output Markdown code fences, explanation, analysis, or any other field.`,
   },
   refine_from_review: {
     systemRole: 'You are a rigorous fiction editor. Produce localized patches from the human-confirmed review items only, preserving author facts, character voice, and every valid passage the review did not flag.',
