@@ -5,6 +5,16 @@ import {
   type ProseQualityComparison,
   type ProseQualityReport,
 } from '../../../shared/prose-quality'
+import {
+  applySpotPatches,
+  parseSpotPatches,
+  SPOT_PATCH_LIMITS,
+  type SpotPatch,
+  type SpotPatchApplyResult,
+} from '../../../shared/spot-patches'
+
+export { applySpotPatches, parseSpotPatches }
+export type { SpotPatch, SpotPatchApplyResult }
 
 /**
  * AI 润色门控：合成「确定性质量检查」与「LLM 文笔门控」两路信号，
@@ -53,8 +63,8 @@ export interface PolishGateDecision {
 }
 
 const MAX_GATE_PROBLEMS = 8
-const MIN_PATCH_FIND_LENGTH = 6
-const MAX_PATCHES = 16
+const MIN_PATCH_FIND_LENGTH = SPOT_PATCH_LIMITS.minFindLength
+const MAX_PATCHES = SPOT_PATCH_LIMITS.maxPatches
 
 function stripCodeFences(raw: string): string {
   return raw
@@ -178,59 +188,6 @@ export function decidePolishGate(input: PolishGateInput): PolishGateDecision {
   return { action, llm, deterministic, comparison, problems: problems.slice(0, MAX_GATE_PROBLEMS), notes }
 }
 
-export interface SpotPatch {
-  find: string
-  replace: string
-}
-
-export interface SpotPatchApplyResult {
-  text: string
-  applied: number
-  missed: number
-}
-
-/** 宽容解析定点修复补丁 JSON：{"patches":[{"find":"…","replace":"…"}]} */
-export function parseSpotPatches(raw: string): SpotPatch[] {
-  const candidate = stripCodeFences(raw)
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  if (start < 0 || end <= start) return []
-  try {
-    const parsed = JSON.parse(candidate.slice(start, end + 1)) as { patches?: unknown }
-    if (!Array.isArray(parsed.patches)) return []
-    const patches: SpotPatch[] = []
-    for (const entry of parsed.patches.slice(0, MAX_PATCHES)) {
-      if (typeof entry !== 'object' || entry === null) continue
-      const record = entry as Record<string, unknown>
-      if (typeof record.find !== 'string' || typeof record.replace !== 'string') continue
-      if (record.find.length < MIN_PATCH_FIND_LENGTH) continue
-      patches.push({ find: record.find, replace: record.replace })
-    }
-    return patches
-  } catch {
-    return []
-  }
-}
-
-/**
- * 逐字精确匹配应用补丁；未命中的补丁直接丢弃并计数，
- * 机械保证「只动问题区」。
- */
-export function applySpotPatches(text: string, patches: SpotPatch[]): SpotPatchApplyResult {
-  let result = text
-  let applied = 0
-  let missed = 0
-  for (const patch of patches) {
-    const index = result.indexOf(patch.find)
-    if (index < 0) {
-      missed += 1
-      continue
-    }
-    result = result.slice(0, index) + patch.replace + result.slice(index + patch.find.length)
-    applied += 1
-  }
-  return { text: result, applied, missed }
-}
 
 export const POLISH_GATE_LIMITS = Object.freeze({
   maxGateProblems: MAX_GATE_PROBLEMS,

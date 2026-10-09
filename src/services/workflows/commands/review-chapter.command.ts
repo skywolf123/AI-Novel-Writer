@@ -7,7 +7,6 @@ import { requireIpcSuccess } from '../../ipc-result'
 import { projectSessionContextFromProject, sameProjectSessionContext } from '../../../shared/project-session-context'
 import type { ProjectSessionContext } from '../../../shared/ipc-channels'
 import type { DraftStatus } from '../../../shared/draft-status'
-import type { FinalizedContinuityProjection } from '../../../shared/finalized-continuity'
 import { readWorkflowDraftMeta } from '../workflow-draft-meta'
 import {
   requireWorkflowProjectSession,
@@ -21,7 +20,7 @@ import { mergeConsistencyFindingsIntoReview, type ReviewLike } from '../../../sh
 import type { ChapterBlueprint } from '../directory-workflow'
 import type { FrozenDraftSourceIdentity } from '../chapter-workflow'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
-import { CHARACTER_STATE_TEXT_FIELDS } from '../../../shared/character-roster'
+import { readCharacterStates, readFinalizedHistory } from '../continuity-context'
 import { buildChapterGoalReviewPrompt, chapterGoalReviewItems, freezeChapterGoals, normalizeChapterGoalReview } from '../../../shared/chapter-goal-review'
 import { detectDuplicateParagraphs, mergeDuplicateSpansIntoReview } from '../../../shared/duplicate-spans'
 import {
@@ -34,6 +33,12 @@ import {
   type ShardReviewItem,
   synthesizeReviewSummary,
 } from '../../../shared/review-shards'
+import {
+  buildReviewCarryover,
+  markRecurringKeys,
+  type ReviewCarryover,
+} from '../../../shared/review-convergence'
+import { HUMAN_CONFIRMED_REVIEW_KIND } from '../../../shared/human-confirmed-review'
 
 
 export interface ReviewChapterParams {
@@ -70,41 +75,6 @@ function parseGoalShardResult(content: string): unknown[] {
     throw new Error('invalid goal review contract')
   }
   return root.goalReviews
-}
-
-function formatFinalizedHistory(
-  projections: readonly FinalizedContinuityProjection[],
-  writingLanguage: NonNullable<CommandExecuteParams['context']['writingLanguage']>,
-): string {
-  const header = promptLanguageText(
-    writingLanguage,
-    '【已确认定稿历史｜唯一已发生事实源】',
-    '[Finalized history | the only source of events that have already happened]',
-  )
-  if (projections.length === 0) return `${header}\n${promptLanguageText(
-    writingLanguage,
-    '（当前章节之前没有已定稿历史）',
-    '(there is no finalized history before the current chapter)',
-  )}`
-  return [
-    header,
-    ...projections.map((projection) => {
-      const facts = (projection.facts ?? []).map(fact => promptLanguageText(
-        writingLanguage,
-        `- [${fact.category}] ${fact.statement}（来源第${fact.sourceChapter}章；证据：${fact.evidence}）`,
-        `- [${fact.category}] ${fact.statement} (source: Chapter ${fact.sourceChapter}; evidence: ${fact.evidence})`,
-      ))
-      return [
-        promptLanguageText(
-          writingLanguage,
-          `### 第${projection.chapterNumber}章 ${projection.chapterTitle}`,
-          `### Chapter ${projection.chapterNumber}: ${projection.chapterTitle}`,
-        ),
-        projection.chapterNotes,
-        ...facts,
-      ].filter(Boolean).join('\n')
-    }),
-  ].join('\n\n')
 }
 
 function formatReviewPlanningMaterial(
@@ -163,24 +133,9 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     callbacks.log(text('准备启动一致性审查引擎...', 'Preparing the continuity review...'))
     callbacks.log(text('  读取已定稿连续性事实...', '  Reading finalized continuity facts...'))
 
-    let contextSummary = formatFinalizedHistory([], writingLanguage)
-    try {
-      const projections = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:continuity-list-before',
-        this.params.chapterNumber,
-        context.projectPath,
-      )
-      contextSummary = formatFinalizedHistory(projections, writingLanguage)
-    } catch {
-      contextSummary = promptLanguageText(
-        writingLanguage,
-        '【已确认定稿历史｜唯一已发生事实源】\n（连续性投影暂时不可用；未使用知识库资料替代）',
-        '[Finalized history | the only source of events that have already happened]\n(continuity projection unavailable; knowledge-base material was not substituted)',
-      )
-    }
+    const contextSummary = await readFinalizedHistory(this.params.chapterNumber, projectSession, writingLanguage)
 
-    const characterState = await this.readCharacterStates(context.projectPath, projectSession, writingLanguage)
+    const characterState = await readCharacterStates(projectSession, writingLanguage)
     const worldBuilding = await this.readWorldBuilding(context.projectPath, projectSession, writingLanguage)
     const globalGuidance = novelConfig.globalGuidance?.trim() || promptLanguageText(
       writingLanguage,
@@ -464,6 +419,29 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       throw new Error(text('找不到基准草稿版本', 'The source draft version could not be found.'))
     }
 
+    // 跨轮收敛度量：与同草稿最近一份 AI 审稿逐条比对原文引用。
+    // 纯确定性证据判定，失败不阻断审稿本身。
+    let carryover: ReviewCarryover | null = null
+    try {
+      carryover = await this.buildReviewCarryover(baseDraftId, draft, projectSession)
+      if (carryover) {
+        callbacks.log(text(
+          `  与上一轮审稿（r${carryover.sourceReviewIndex}）比对：已修复 ${carryover.resolvedCount} 项，原文未动 ${carryover.recurringCount} 项`,
+          `  Compared with the previous review (r${carryover.sourceReviewIndex}): ${carryover.resolvedCount} resolved, ${carryover.recurringCount} still verbatim`,
+        ))
+      }
+    } catch {
+      callbacks.log(text(
+        '  上一轮审稿比对暂不可用；本次报告不包含收敛度量。',
+        '  Previous-review comparison unavailable; this report has no convergence metrics.',
+      ))
+    }
+
+    if (carryover) {
+      parsedResult.carryover = carryover
+      markRecurringKeys(carryover, parsedResult.items ?? [])
+    }
+
     this.assertNotCancelled(context)
     const createResult = await ipc.invokeWithProjectSession(projectSession, 'db:review-create', {
       baseDraftId,
@@ -527,33 +505,38 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     return JSON.stringify(parsedResult, null, 2)
   }
 
-  private async readCharacterStates(
-    projectPath: string,
+
+  /**
+   * 取同草稿最近一份「AI 审稿」（跳过 human-confirmed 快照行），
+   * 与当前正文逐条比对原文引用，产出收敛度量。最多向前看 5 份。
+   */
+  private async buildReviewCarryover(
+    baseDraftId: number,
+    currentText: string,
     projectSession: ProjectSessionContext,
-    writingLanguage: NonNullable<CommandExecuteParams['context']['writingLanguage']>,
-  ): Promise<string> {
-    try {
-      const allChars = await ipc.invokeWithProjectSession(projectSession, 'db:character-get-all', projectPath)
-      const states: string[] = []
-      for (const card of allChars) {
-        if (card.name && card.currentState) {
-          const cs = card.currentState
-          const authorState = Object.fromEntries(CHARACTER_STATE_TEXT_FIELDS.flatMap((field) => {
-            const provenance = cs.provenance?.[field]
-            return provenance?.kind === 'author' && cs[field]
-              ? [[field, `${cs[field]} @ch${provenance.chapterNumber}`]]
-              : []
-          }))
-          if (Object.keys(authorState).length === 0) continue
-          states.push(promptLanguageText(
-            writingLanguage,
-            `${card.name}（${card.role || '未知'}）作者状态（按标注章节理解，非永久约束）: ${JSON.stringify(authorState)}`,
-            `${card.name} (${card.role || 'unknown'}) author state (time-bound to the annotated chapter, not permanent): ${JSON.stringify(authorState)}`,
-          ))
-        }
-      }
-      return states.length > 0 ? states.join('\n') : promptLanguageText(writingLanguage, '（暂无）', '(none)')
-    } catch { return promptLanguageText(writingLanguage, '（读取失败）', '(unavailable)') }
+  ): Promise<ReviewCarryover | null> {
+    const metas = await ipc.invokeWithProjectSession(
+      projectSession, 'db:review-list', baseDraftId, projectSession.projectPath,
+    )
+    if (!Array.isArray(metas)) return null
+    for (const meta of [...metas].reverse().slice(0, 5)) {
+      if (typeof meta?.id !== 'number') continue
+      const full = await ipc.invokeWithProjectSession(
+        projectSession, 'db:review-get-full', meta.id, projectSession.projectPath,
+      )
+      if (!full?.content) continue
+      let parsed: unknown
+      try { parsed = JSON.parse(full.content) } catch { continue }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+      const record = parsed as Record<string, unknown>
+      if (record.kind === HUMAN_CONFIRMED_REVIEW_KIND) continue
+      if (!Array.isArray(record.items)) continue
+      return buildReviewCarryover(
+        { id: meta.id, reviewIndex: meta.reviewIndex ?? 0, items: record.items },
+        currentText,
+      )
+    }
+    return null
   }
 
   private async readWorldBuilding(

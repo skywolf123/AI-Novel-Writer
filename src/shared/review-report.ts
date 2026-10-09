@@ -1,4 +1,5 @@
 import { parseChapterGoalReview, type ChapterGoalReview } from './chapter-goal-review'
+import type { ReviewCarryover } from './review-convergence'
 
 /**
  * Review-report parsing and the checklist defaults the AI review screen starts
@@ -162,4 +163,52 @@ export function parseReviewReport(
   }
 
   return parseLegacyReport(text, fallbackCategory)
+}
+
+/**
+ * 从审稿报告 JSON 中防御性解析跨轮收敛块；旧报告或确认快照没有该块时返回 null。
+ */
+export function parseReviewCarryover(reportText: string): ReviewCarryover | null {
+  let parsed: unknown
+  try { parsed = JSON.parse(reportText) } catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const raw = (parsed as Record<string, unknown>).carryover
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+  if (
+    typeof record.sourceReviewId !== 'number'
+    || typeof record.sourceReviewIndex !== 'number'
+    || typeof record.resolvedCount !== 'number'
+    || typeof record.recurringCount !== 'number'
+    || !Array.isArray(record.items)
+    || !Array.isArray(record.recurringKeys)
+  ) return null
+  const items: ReviewCarryover['items'] = []
+  for (const entry of record.items) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+    const item = entry as Record<string, unknown>
+    if (
+      typeof item.category !== 'string'
+      || (item.severity !== 'error' && item.severity !== 'warning')
+      || typeof item.description !== 'string'
+      || typeof item.quote !== 'string'
+      || (item.status !== 'recurring' && item.status !== 'resolved')
+    ) return null
+    items.push({
+      category: item.category,
+      severity: item.severity,
+      description: item.description,
+      quote: item.quote,
+      status: item.status,
+    })
+  }
+  const recurringKeys = record.recurringKeys.filter((key): key is string => typeof key === 'string')
+  return {
+    sourceReviewId: record.sourceReviewId,
+    sourceReviewIndex: record.sourceReviewIndex,
+    resolvedCount: record.resolvedCount,
+    recurringCount: record.recurringCount,
+    items,
+    recurringKeys,
+  }
 }
