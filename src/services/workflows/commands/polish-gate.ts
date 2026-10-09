@@ -8,6 +8,7 @@ import {
 import {
   applySpotPatches,
   parseSpotPatches,
+  stripCodeFences,
   SPOT_PATCH_LIMITS,
   type SpotPatch,
   type SpotPatchApplyResult,
@@ -65,13 +66,6 @@ export interface PolishGateDecision {
 const MAX_GATE_PROBLEMS = 8
 const MIN_PATCH_FIND_LENGTH = SPOT_PATCH_LIMITS.minFindLength
 const MAX_PATCHES = SPOT_PATCH_LIMITS.maxPatches
-
-function stripCodeFences(raw: string): string {
-  return raw
-    .replace(/^[\s\S]*?```(?:json)?\s*\n?/u, match => (match.includes('```') ? '' : match))
-    .replace(/```\s*[\s\S]*$/u, '')
-    .trim()
-}
 
 /** 宽容解析 LLM 门控 JSON：剥代码围栏、截取首个完整 JSON 对象、逐字段校验 */
 export function parsePolishGateJson(raw: string | null): PolishGateLLMReport {

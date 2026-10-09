@@ -7,6 +7,8 @@
  * "引用原文是否还在当前正文"，不猜测问题语义是否真正解决。
  */
 
+import { normalizeEvidence } from './review-shards'
+
 export type CarryoverStatus = 'recurring' | 'resolved'
 
 export interface CarryoverEvidenceItem {
@@ -28,14 +30,6 @@ export interface ReviewCarryover {
   items: CarryoverEntry[]
   /** 本轮新发现中命中上一轮同键的证据键；仅作界面标记，不参与任何门控 */
   recurringKeys: string[]
-}
-
-/** 与 dedupeReviewItems 同一套归一化：NFC、去空白/标点/符号、小写 */
-export function normalizeEvidence(value: string): string {
-  return value
-    .normalize('NFC')
-    .replace(/[\s\p{P}\p{S}\s]/gu, '')
-    .toLowerCase()
 }
 
 /** 一条发现的证据键：category + 归一化引用；与跨分片去重键同形 */
@@ -112,18 +106,28 @@ export function buildReviewCarryover(
 /**
  * 本轮新发现中，哪些与上一轮同键（同一 category + 同一原文引用）。
  * 用于把「修不掉的硬问题」在新报告里标记为「上轮已报」。
+ * 与上一轮候选口径一致：pass 行与本章目标行（goalId）不参与。
  */
 export function markRecurringKeys(
   carryover: ReviewCarryover,
-  currentItems: readonly { category?: unknown; quote?: unknown }[],
+  currentItems: readonly {
+    category?: unknown
+    quote?: unknown
+    severity?: unknown
+    goalId?: unknown
+  }[],
 ): void {
   const previousKeys = new Set(
     carryover.items.map(item => evidenceKey(item.category, item.quote)),
   )
   for (const item of currentItems) {
+    if (item.goalId !== undefined && item.goalId !== null) continue
+    if (item.severity !== 'error' && item.severity !== 'warning') continue
     if (typeof item.category !== 'string' || typeof item.quote !== 'string') continue
     if (!item.quote.trim()) continue
     const key = evidenceKey(item.category, item.quote)
-    if (previousKeys.has(key)) carryover.recurringKeys.push(key)
+    if (previousKeys.has(key) && !carryover.recurringKeys.includes(key)) {
+      carryover.recurringKeys.push(key)
+    }
   }
 }
