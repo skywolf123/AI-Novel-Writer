@@ -863,12 +863,18 @@ function ReviewReportSession({
                                 <span className={cn('ml-2 text-[0.65rem] opacity-70', meta.colorClass)}>
                                   [{copy.actionLabel}]
                                 </span>
-                                {reportedLastRound && (
-                                  <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded bg-yellow-500/20 text-[0.65rem] text-[var(--color-warning-text)]">
-                                    {text('上轮已报', 'Reported last round')}
-                                  </span>
-                                )}
                               </div>
+                            )}
+                            {/* 证据键命中上一轮报告：本轮仍在报 → 修不掉的硬问题 */}
+                            {reportedLastRound && (
+                              <p className="text-[0.7rem]">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-yellow-500/20 text-[var(--color-warning-text)]">
+                                  {text('上轮已报', 'Reported last round')}
+                                </span>
+                                <span className="ml-2 text-[var(--color-text-muted)]">
+                                  {text('与上一轮审稿同一条原文引用。', 'Same quote as the previous review round.')}
+                                </span>
+                              </p>
                             )}
                             {item.sourceChapter && (
                               <p className="text-[0.7rem] text-[var(--color-text-muted)]">
