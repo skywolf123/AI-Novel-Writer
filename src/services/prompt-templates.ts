@@ -66,6 +66,7 @@ export const EDITABLE_PROMPT_KEYS: string[] = [
   'consistency_check_narration',
   'analyze_writing_style',
   'refine_from_review',
+  'split_key_events',
   'generate_chapter_notes',
   'update_character_cards',
   'infer_novel_config',
@@ -127,6 +128,7 @@ export const PROMPT_VARIABLE_DESCRIPTIONS_EN: Readonly<Record<string, string>> =
   m: 'Ending chapter number for this segment',
   pacing_guidance: 'Author pacing guidance (optional)',
   chapter_number: 'Chapter number',
+  key_events: 'Chapter key events (the only input)',
   chapter_title: 'Chapter title',
   existing_cards_json: 'Existing character records as JSON',
   sample_content: 'Imported manuscript sample',
@@ -1258,6 +1260,44 @@ severity 取值：error=严重违规强烈建议修复, warning=轻微不一致�
 - 适用边界：
 
 不要添加任何无关解释或客套话。`,
+  },
+
+  // ================================================================
+  // 蓝图 keyEvents 节拍拆分
+  // ================================================================
+
+  {
+    key: 'split_key_events',
+    name: '关键事件拆分节拍',
+    description: '把本章蓝图的关键事件长段落按原意拆成 2-6 个事件节拍，只改格式不改内容',
+    systemRole: '你是一位严谨的小说结构分析师。你的任务只是重新组织既有的事件描述格式，绝不新增、删除或改写事件内容。',
+    variables: {
+      chapter_number: '章节编号',
+      key_events: '本章关键事件原文（唯一输入）',
+    },
+    content: `请把下面这段【本章关键事件】按原意拆分成 2-6 个事件节拍。
+
+【第{{chapter_number}}章 关键事件原文】
+{{key_events}}
+
+【任务边界】
+- 唯一输入是上面的原文；不得引入原文之外的任何事件、人物、设定、日期或数值。
+- 不得新增事件、删除事件、改写事件含义，也不得把解释性评论写进节拍。
+- 每个节拍是一个不可逆的事件：谁做了什么、遭遇什么反转、结果如何。
+- 保持原文措辞与顺序，只做切分与必要的语气衔接；不要润色。
+- 若原文的事件不足 2 个，可保留 1 个完整节拍再补一个原文已隐含的结果节拍。
+
+【拆分规则】
+1. 节拍总数必须是 2-6 个，超出时把同一场景内的连续动作合并为一个节拍。
+2. 每个节拍 20-50 字，全部节拍合计不超过 900 字。
+3. 节拍内部不得使用分号或换行。
+
+【输出格式】
+只输出一个 JSON 对象，根字段仅 keyEvents 数组：
+
+{"keyEvents":["第一个节拍","第二个节拍"]}
+
+不要输出 Markdown 代码块、解释、分析或其他任何字段。`,
   },
 
   {

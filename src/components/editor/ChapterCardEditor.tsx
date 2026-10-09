@@ -4,7 +4,7 @@ import {
   Sparkles, PenLine, FilePlus, ListChecks, AlertTriangle
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
-import { useWorkflowStore } from '../../stores/workflow-store'
+import { useWorkflowStore, workflowResourceConflictMessage } from '../../stores/workflow-store'
 import { useLayoutStore } from '../../stores/layout-store'
 import { ipc } from '../../services/ipc-client'
 import { clearProjectData } from '../../services/project-clear-service'
@@ -22,6 +22,7 @@ import {
   type DirectoryWorkflowParams,
 } from '../../services/workflows/directory-workflow'
 import { launchCreativeWorkflow } from '../../services/workflows/creative-workflow-launcher'
+import { createSplitKeyEventsWorkflow } from '../../services/workflows/blueprint-workflow'
 import { createManualBlankDraft } from '../../services/manual-draft'
 import { guardDirectoryGeneration } from '../../services/workflow-guards'
 import DirectoryConfigDialog from '../dialogs/DirectoryConfigDialog'
@@ -369,6 +370,59 @@ export default function ChapterCardEditor({
     markChapterDirty(blueprintsRef.current.map((b, i) => (
       i === selectedIdx ? updateEditableChapterBlueprintField(b, key, value) : b
     )), selected.chapterNumber)
+  }
+
+  /** 正在把 keyEvents 拆分为节拍（LLM 调用中）。 */
+  const [splittingKeyEvents, setSplittingKeyEvents] = useState(false)
+
+  /**
+   * 把当前章的 keyEvents 长段落按原意拆成 2-6 个节拍。
+   * 结果只回填到编辑框，由作者确认后手动保存——拆分属于改写验收目标来源，
+   * 不做静默入库。
+   */
+  const handleSplitKeyEvents = async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (
+      !projectMatches
+      || !projectSession
+      || !selected
+      || splittingKeyEvents
+      || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
+    ) return
+    const source = selected.keyEvents.trim()
+    if (!source) {
+      toast.warning(text('关键事件为空，无法拆分', 'The key events are empty, so nothing can be split.'))
+      return
+    }
+    const chapterNumber = selected.chapterNumber
+    setSplittingKeyEvents(true)
+    try {
+      const workflow = createSplitKeyEventsWorkflow({
+        projectPath: projectKey,
+        projectSession,
+        chapterNumber,
+        keyEvents: source,
+        onGenerated: beats => {
+          if (!isCurrentProjectSession(projectSession)) return
+          updateField('keyEvents', beats.join('\n'))
+        },
+      })
+      const conflict = useWorkflowStore.getState().getResourceConflict(workflow)
+      if (conflict) {
+        toast.warning(workflowResourceConflictMessage(useLocaleStore.getState().locale, conflict.title))
+        return
+      }
+      addLog('info', text(`正在拆分第 ${chapterNumber} 章关键事件节拍...`, `Splitting key events for Chapter ${chapterNumber}...`))
+      await useWorkflowStore.getState().startWorkflow(workflow)
+      addLog('info', text(`第 ${chapterNumber} 章关键事件已拆分，请确认后保存蓝图`, `Key events for Chapter ${chapterNumber} are split; review and save the blueprint`))
+    } catch (err) {
+      if (!isCurrentProjectSession(projectSession)) return
+      const message = err instanceof Error ? err.message : String(err)
+      addLog('error', text(`拆分第 ${chapterNumber} 章关键事件失败：${message}`, `Could not split key events for Chapter ${chapterNumber}: ${message}`))
+      toast.error(text(`拆分失败\n\n${message}`, 'Split failed.'))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setSplittingKeyEvents(false)
+    }
   }
 
   /** 保存当前章节蓝图 */
@@ -1082,7 +1136,24 @@ export default function ChapterCardEditor({
                 </div>
 
                 <div>
-                  <Label>{text('实质冲突与转折', 'Core conflict and turning point')}</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>{text('实质冲突与转折', 'Core conflict and turning point')}</Label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSplitKeyEvents}
+                      disabled={splittingKeyEvents}
+                      title={text(
+                        '把这章关键事件按原意拆成 2-6 个节拍（只改格式，不改事件内容），结果填入编辑框，确认后自行保存',
+                        'Split this chapter’s key events into 2-6 beats preserving the original meaning (format only); the result fills the field and you save it yourself',
+                      )}
+                    >
+                      <Sparkles size={12} />
+                      {splittingKeyEvents
+                        ? text('拆分中...', 'Splitting...')
+                        : text('AI 拆分节拍', 'Split into beats')}
+                    </Button>
+                  </div>
                   <Textarea
                     value={selected.keyEvents}
                     onChange={e => updateField('keyEvents', e.target.value)}
