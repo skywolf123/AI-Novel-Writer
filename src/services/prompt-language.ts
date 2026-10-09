@@ -641,12 +641,13 @@ severity must be error, warning, or pass. The root object allows only items; nev
 {{global_guidance}}
 
 [Revision principles]
-1. Fix only the problems explicitly named in the review report; one patch per review item, resolved one by one.
+1. Fix only the problems explicitly named in the review report, resolved item by item; one review item may yield multiple patches.
 2. find must be a verbatim contiguous excerpt copied from [Manuscript to revise] (at least 6 characters, preferably a whole sentence); replace is the fixed text.
-3. Never touch anything the review report does not mention; do not reorder paragraphs or polish the whole chapter.
-4. Minimal change: the smaller the edit the better, fix only the problem itself, and keep the original voice and approximate length.
-5. To insert a new sentence, use a nearby sentence from the manuscript as the find anchor and set replace to that anchor sentence plus the new content.
-6. Patches must not contradict [Finalized prior-chapter facts] or [Character states]; if a review item conflicts with this chapter's fact sources and cannot be fixed safely, skip it instead of forcing a change.`,
+3. Ripple sync: if a fix changes a date, time, number, character count, item count, index number, or name, search for every verbatim occurrence of the old value in [Manuscript to revise] and emit one patch per occurrence. Changing only the flagged sentence while leaving the same value quoted elsewhere creates a new contradiction.
+4. Never touch anything the review report does not mention; do not reorder paragraphs or polish the whole chapter.
+5. Minimal change: the smaller the edit the better, fix only the problem itself, and keep the original voice and approximate length.
+6. To insert a new sentence, use a nearby sentence from the manuscript as the find anchor and set replace to that anchor sentence plus the new content. Inserted content must not introduce new concrete dates, times, index numbers, numeric values, or names unless the review item explicitly provides them.
+7. Patches must not contradict [Finalized prior-chapter facts] or [Character states]; if a review item conflicts with this chapter's fact sources, requires re-anchoring the whole timeline, or rewriting an entire passage to resolve, skip it instead of forcing a change.`,
     systemSuffix: `* [Author guidance for this step — highest priority when present]
 {{user_refine_prompt}}
 
