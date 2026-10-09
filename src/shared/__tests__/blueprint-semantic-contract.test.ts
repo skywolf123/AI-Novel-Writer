@@ -205,9 +205,40 @@ describe('blueprint semantic contract', () => {
 
   it('gives key events a concise target below the hard maximum in both languages', () => {
     expect(blueprintSemanticGenerationContract('en-US'))
-      .toContain('Keep keyEvents concise; aim for no more than 900 characters and never exceed the hard maximum of 1,200.')
+      .toContain('Keep keyEvents concise: 2-6 beat items totalling no more than 900 characters, never exceeding the hard maximum of 1,200.')
     expect(blueprintSemanticGenerationContract('zh-CN'))
-      .toContain('keyEvents 保持精炼，目标为 100–150 字符，绝不得超过 1200 字符硬上限。')
+      .toContain('keyEvents 保持精炼：2-6 个节拍项，总计不超过 900 字符，绝不得超过 1200 字符硬上限。')
+  })
+
+  it('requires keyEvents as a beat array in both languages', () => {
+    expect(blueprintSemanticGenerationContract('en-US'))
+      .toContain('keyEvents must be an array of 2-6 non-empty strings, one irreversible story beat per item')
+    expect(blueprintSemanticGenerationContract('zh-CN'))
+      .toContain('keyEvents 必须是字符串数组：2-6 项、每项一个不可逆事件节拍')
+  })
+
+  it('accepts keyEvents as a beat array and joins it into newline-separated prose', () => {
+    const decoded = decodeBlueprintSemanticPayload(
+      { blueprints: [validBlueprint({
+        keyEvents: [
+          '主角收到失踪多年的兄长寄来的密信',
+          '信封夹层发现追踪器；立即判断屋内有内应',
+        ],
+      })] },
+      [1],
+    )
+    expect(decoded[0]?.keyEvents).toBe('主角收到失踪多年的兄长寄来的密信\n信封夹层发现追踪器，立即判断屋内有内应')
+  })
+
+  it('rejects an empty keyEvents array and non-string beat items', () => {
+    expect(() => decodeBlueprintSemanticPayload(
+      { blueprints: [validBlueprint({ keyEvents: [] })] },
+      [1],
+    )).toThrow(/code=empty_value path=blueprints\[0\]\.keyEvents/u)
+    expect(() => decodeBlueprintSemanticPayload(
+      { blueprints: [validBlueprint({ keyEvents: ['有效节拍', 42] })] },
+      [1],
+    )).toThrow(/code=invalid_value path=blueprints\[0\]\.keyEvents/u)
   })
 
   it('requires exact chapter coverage with no missing, extra, or duplicate chapter', () => {

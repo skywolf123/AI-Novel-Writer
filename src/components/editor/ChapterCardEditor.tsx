@@ -1086,7 +1086,7 @@ export default function ChapterCardEditor({
                   <Textarea
                     value={selected.keyEvents}
                     onChange={e => updateField('keyEvents', e.target.value)}
-                    placeholder={text('主角做了什么，遭遇了什么反转，金手指怎么用的...', 'What the protagonist does, the reversal they encounter, and how special abilities are used...')}
+                    placeholder={text('每行一个事件节拍：主角做了什么、遭遇了什么反转、金手指怎么用（含因果与结果）…（审稿按行冻结为逐项目标）', 'One story beat per line: what the protagonist does, the reversal they encounter, and how the special ability is used... (review freezes each line into a separate goal)')}
                     rows={4}
                   />
                 </div>

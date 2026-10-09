@@ -52,24 +52,24 @@ export function blueprintSemanticGenerationContract(writingLanguage: WritingLang
   if (writingLanguage === 'en-US') {
     return `[Immutable blueprint JSON contract]
 Output {"blueprints":[...]} only. Every item must contain all of these fields: ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.requiredFields.join(', ')}.
-chapterNumber must cover every target chapter exactly once, without duplicates or out-of-range values. title, role, purpose, keyEvents, and suspenseHook must be non-empty strings.
+chapterNumber must cover every target chapter exactly once, without duplicates or out-of-range values. title, role, purpose, and suspenseHook must be non-empty strings. keyEvents must be an array of 2-6 non-empty strings, one irreversible story beat per item covering actions, reversals, consequences, and relevant use of the central advantage; a single string is also accepted and split by line breaks.
 suspenseHook is always required; even without a mystery, state one concrete unresolved decision, threat, revelation, or consequence that creates forward pressure.
 characters must be an array containing at least one unique, non-empty full character name.
 newCharacterCandidates is optional. When present, include only important named characters first introduced by this blueprint and expected to recur. Every item must contain name and role, name must exactly copy one entry from characters, and role must be protagonist, antagonist, supporting, or minor. Omit it or use [] when there are no candidates; never include incidental figures.
 relationships is required and may be []; every item must contain non-empty from, to, and relation fields. from and to must exactly copy full names from the same item's characters array and may not self-reference.
-Keep keyEvents concise; aim for no more than 900 characters and never exceed the hard maximum of 1,200.
+Keep keyEvents concise: 2-6 beat items totalling no more than 900 characters, never exceeding the hard maximum of 1,200.
 Limits: title ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.titleCharacters} characters; role ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.roleCharacters}; purpose ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.purposeCharacters}; keyEvents ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.keyEventsCharacters}; suspenseHook ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.suspenseHookCharacters}; characters at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterItems} items with names at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterNameCharacters} characters; relationships at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipItems} items with relation at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipCharacters} characters.
 Do not omit required fields, combine chapters, rename fields, explain, or output Markdown or code fences.`
   }
   return `【不可变蓝图 JSON 合同】
 只输出 {"blueprints":[...]}，每项必须完整包含：${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.requiredFields.join('、')}。
-chapterNumber 必须覆盖本批每个目标章节且不得重复或越界；title、role、purpose、keyEvents、suspenseHook 必须是非空字符串。
+chapterNumber 必须覆盖本批每个目标章节且不得重复或越界；title、role、purpose、suspenseHook 必须是非空字符串。keyEvents 必须是字符串数组：2-6 项、每项一个不可逆事件节拍（主角做了什么、遭遇什么反转、金手指怎么用，含因果与结果）；也接受单个字符串，将按换行拆分。
 suspenseHook 始终必填；即使本章没有谜团，也要写明一个制造推进压力的具体未决决定、威胁、揭示或后果。
 characters 必须是至少含一个唯一非空角色名的字符串数组。
 newCharacterCandidates 可选；提供时只声明由本章首次引入且预计后续复用的重要具名角色，每项必须包含 name、role，name 必须逐字复制 characters 中的一个完整姓名，role 只能是 protagonist、antagonist、supporting、minor。无候选时可省略或传 []，一次性路人不得声明为候选。
 relationships 必须是数组，无关系时传 []；每项必须含非空 from、to、relation，from/to 必须精确出现在同项 characters 中且不能自指。
 from/to 必须逐字复制同一项 characters 中的完整字符串；任一端点不在 characters 时，删除该关系或使用 []，不得发明别名、简称或补写角色。
-keyEvents 保持精炼，目标为 100–150 字符，绝不得超过 1200 字符硬上限。
+keyEvents 保持精炼：2-6 个节拍项，总计不超过 900 字符，绝不得超过 1200 字符硬上限。
 每项长度上限：title ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.titleCharacters} 字符、role ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.roleCharacters} 字符、purpose ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.purposeCharacters} 字符、keyEvents ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.keyEventsCharacters} 字符、suspenseHook ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.suspenseHookCharacters} 字符；characters 最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterItems} 项且姓名最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterNameCharacters} 字符；relationships 最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipItems} 项且 relation 最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipCharacters} 字符。
 不得省略必填字段、合并章节、输出近义字段、解释、Markdown 或代码围栏。`
 }
@@ -234,6 +234,27 @@ export function validateBlueprintSemanticItem(value: unknown): string | undefine
   }
 }
 
+/**
+ * keyEvents 接受单个字符串或字符串数组（每项一个不可逆事件节拍），统一规整为
+ * 按行连接的字符串。数组项内的分号替换为逗号：审稿按行和分号切分验收目标，
+ * 节拍内保留分号会把一拍拆成两条目标。
+ */
+function normalizedKeyEvents(value: Record<string, unknown>, path: string): string {
+  const raw = fieldValue(value, 'keyEvents', ['key_events'])
+  const limit = BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.keyEventsCharacters
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) throw new StructuredContractDiagnostic('empty_value', `${path}.keyEvents`)
+    const beats = raw.map((item) => {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new StructuredContractDiagnostic('invalid_value', `${path}.keyEvents`)
+      }
+      return item.trim().replace(/[；;]/gu, '，')
+    })
+    return requiredText(beats.join('\n'), `${path}.keyEvents`, limit)
+  }
+  return requiredText(raw, `${path}.keyEvents`, limit)
+}
+
 export function normalizeBlueprintSemanticItem(value: unknown, path = 'blueprint'): BlueprintSemanticItem {
   if (!isRecord(value)) throw new StructuredContractDiagnostic('invalid_type', path)
   const chapterNumber = normalizedChapterNumber(value, path)
@@ -253,11 +274,7 @@ export function normalizeBlueprintSemanticItem(value: unknown, path = 'blueprint
     title: requiredText(value.title, `${path}.title`, BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.titleCharacters),
     role: requiredText(value.role, `${path}.role`, BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.roleCharacters),
     purpose: requiredText(value.purpose, `${path}.purpose`, BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.purposeCharacters),
-    keyEvents: requiredText(
-      fieldValue(value, 'keyEvents', ['key_events']),
-      `${path}.keyEvents`,
-      BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.keyEventsCharacters,
-    ),
+    keyEvents: normalizedKeyEvents(value, path),
     characters,
     newCharacterCandidates,
     relationshipHints,
