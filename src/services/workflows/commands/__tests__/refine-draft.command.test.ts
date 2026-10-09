@@ -1339,12 +1339,13 @@ describe('ReviewChapterCommand reasoning stage', () => {
       step: {}, context: workflowContext(), callbacks: stepCallbacks,
     })).resolves.toContain('No conflict found.')
 
+    // 本章蓝图读取失败 → 无逐项目标行 → 覆盖率横幅是唯一提示（保留）
     expect(JSON.parse(createParams[0]!.content)).toMatchObject({
       summary: '审稿包含待核实项目，不能视为全部通过。',
       goalReview: { coverage: 'unknown' },
       items: [
         { category: 'continuity', severity: 'pass', description: 'No conflict found.' },
-        { severity: 'unknown' },
+        { category: '本章目标', severity: 'unknown' },
       ],
     })
     expect(stepCallbacks.log).toHaveBeenCalledWith('一致性证据暂时不可用；AI 审稿仍会继续。')

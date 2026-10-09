@@ -34,7 +34,11 @@ describe('本章目标审稿合同', () => {
     expect(result.coverage).toBe('unknown')
     expect(result.items.map(item => item.text)).toEqual(goals.items.map(item => item.text))
     expect(result.items.some(item => item.status === 'unknown')).toBe(true)
-    expect(chapterGoalReviewItems(result, 'zh-CN').some(item => item.severity === 'unknown')).toBe(true)
+    const projected = chapterGoalReviewItems(result, 'zh-CN')
+    // 已有逐项目标行时不再追加同义覆盖率横幅：横幅只在没有目标行时才出现。
+    expect(projected).toHaveLength(goals.items.length)
+    expect(projected.every(item => typeof item.goalId === 'string')).toBe(true)
+    expect(projected.some(item => item.severity === 'unknown')).toBe(true)
   })
 
   it('区分有延期证据的未完成和没有充分证据的未知，不额外请求模型', () => {
@@ -52,8 +56,16 @@ describe('本章目标审稿合同', () => {
     const unavailable = normalizeChapterGoalReview([], freezeChapterGoals(3, undefined), draft, 'zh-CN')
     expect(absent.coverage).toBe('not_configured')
     expect(unavailable.coverage).toBe('unknown')
-    expect(chapterGoalReviewItems(absent, 'zh-CN')[0]?.severity).toBe('unknown')
-    expect(chapterGoalReviewItems(unavailable, 'zh-CN')[0]?.severity).toBe('unknown')
+    // 没有目标行时，横幅是唯一能把「未完成目标验收」说出来的东西。
+    const absentItems = chapterGoalReviewItems(absent, 'zh-CN')
+    const unavailableItems = chapterGoalReviewItems(unavailable, 'zh-CN')
+    expect(absentItems).toHaveLength(1)
+    expect(unavailableItems).toHaveLength(1)
+    expect(absentItems[0]?.severity).toBe('unknown')
+    expect(unavailableItems[0]?.severity).toBe('unknown')
+    expect(absentItems[0]?.goalId).toBeUndefined()
+    expect(String(absentItems[0]?.description)).toContain('未配置可核对的关键事件')
+    expect(String(unavailableItems[0]?.description)).toContain('目标来源或逐项核对不完整')
   })
 
   it('提示强调到期动作、原意和同一请求，不要求未来行动提前兑现', () => {

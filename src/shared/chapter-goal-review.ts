@@ -144,7 +144,9 @@ export function chapterGoalReviewItems(review: ChapterGoalReview, language: Writ
     description: `${item.text}\n${item.description}`,
     ...(item.evidence.length ? { quote: item.evidence.map(evidence => evidence.quote).join('\n') } : {}),
   }))
-  if (review.coverage !== 'complete') items.push({
+  // 只有「没有目标行」时才补横幅：coverage 为 unknown 但存在逐项目标时，
+  // 每条目标行已各自说明核对失败原因，再补一条同义横幅只会重复且措辞含糊。
+  if (items.length === 0 && review.coverage !== 'complete') items.push({
     category, severity: 'unknown',
     description: review.coverage === 'not_configured'
       ? writingLanguageText(language, '本章未配置可核对的关键事件，未完成目标验收。', 'No chapter key events are configured; goal acceptance was not performed.')
