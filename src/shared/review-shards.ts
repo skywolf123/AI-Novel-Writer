@@ -123,18 +123,26 @@ export function parseShardReviewItems(content: string): ShardReviewItem[] {
 }
 
 /**
+ * 证据归一化：NFC、去空白/标点/符号、小写。
+ * 跨分片去重与跨轮收敛度量共用同一实现，保证两边对
+ * 「同一条原文引用」的判定永远不会漂移。
+ */
+export function normalizeEvidence(value: string): string {
+  return value
+    .normalize('NFC')
+    .replace(/[\s\p{P}\p{S}]/gu, '')
+    .toLowerCase()
+}
+
+/**
  * 跨分片去重：同一问题被两个分片重复报告时保留更严重的一条。
  * 判定键 = category + 归一化 quote（无 quote 时用 description）；
  * 只做确定性归一化精确匹配，不猜测改写。
  */
 export function dedupeReviewItems(items: readonly ShardReviewItem[]): ShardReviewItem[] {
-  const normalized = (value: string): string => value
-    .normalize('NFC')
-    .replace(/[\s\p{P}\p{S}]/gu, '')
-    .toLowerCase()
   const byKey = new Map<string, ShardReviewItem>()
   for (const item of items) {
-    const key = `${item.category}|${normalized(item.quote ?? item.description)}`
+    const key = `${item.category}|${normalizeEvidence(item.quote ?? item.description)}`
     const existing = byKey.get(key)
     if (!existing || SEVERITY_RANK[item.severity] < SEVERITY_RANK[existing.severity]) {
       byKey.set(key, item)

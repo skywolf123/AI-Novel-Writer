@@ -20,7 +20,8 @@ export const SPOT_PATCH_LIMITS = Object.freeze({
   maxPatches: 16,
 })
 
-function stripCodeFences(raw: string): string {
+/** 剥掉 Markdown 代码围栏（如有），供宽容 JSON 解析共用 */
+export function stripCodeFences(raw: string): string {
   return raw
     .replace(/^[\s\S]*?```(?:json)?\s*\n?/u, match => (match.includes('```') ? '' : match))
     .replace(/```\s*[\s\S]*$/u, '')

@@ -6,9 +6,9 @@ import {
   classifyCarryover,
   evidenceKey,
   markRecurringKeys,
-  normalizeEvidence,
   type ReviewCarryover,
 } from '../review-convergence'
+import { normalizeEvidence } from '../review-shards'
 
 const ORIGINAL = [
   '林岚把信收进抽屉，转身走出了档案室。',
@@ -123,11 +123,60 @@ describe('review convergence', () => {
       recurringKeys: [],
     }
     const currentItems = [
-      { category: '剧情连贯性', quote: '林岚，把信 收进抽屉' },
-      { category: '剧情连贯性', quote: '完全不同的一句新引用' },
-      { category: '剧情连贯性' },
+      { category: '剧情连贯性', severity: 'error', quote: '林岚，把信 收进抽屉' },
+      { category: '剧情连贯性', severity: 'warning', quote: '完全不同的一句新引用' },
+      { category: '剧情连贯性', severity: 'error' },
     ]
     markRecurringKeys(carryover, currentItems)
+    expect(carryover.recurringKeys).toEqual([evidenceKey('剧情连贯性', '林岚把信收进抽屉')])
+  })
+
+  it('skips goal rows and non-evidenced severities when marking repeated findings', () => {
+    const carryover: ReviewCarryover = {
+      sourceReviewId: 9,
+      sourceReviewIndex: 3,
+      resolvedCount: 0,
+      recurringCount: 1,
+      items: [{
+        category: '剧情连贯性',
+        severity: 'error',
+        description: '信的去向前后矛盾',
+        quote: '林岚把信收进抽屉',
+        status: 'recurring',
+      }],
+      recurringKeys: [],
+    }
+    const currentItems = [
+      // 本章目标行：即使 category + quote 同键也不参与（goalId 行不标记）
+      { goalId: 'g1', category: '剧情连贯性', severity: 'error', quote: '林岚把信收进抽屉' },
+      // pass 行不参与
+      { category: '剧情连贯性', severity: 'pass', quote: '林岚把信收进抽屉' },
+      // 待核实行不参与
+      { category: '剧情连贯性', severity: 'unknown', quote: '林岚把信收进抽屉' },
+    ]
+    markRecurringKeys(carryover, currentItems)
+    expect(carryover.recurringKeys).toEqual([])
+  })
+
+  it('records a repeated evidence key only once', () => {
+    const carryover: ReviewCarryover = {
+      sourceReviewId: 9,
+      sourceReviewIndex: 3,
+      resolvedCount: 0,
+      recurringCount: 1,
+      items: [{
+        category: '剧情连贯性',
+        severity: 'error',
+        description: '信的去向前后矛盾',
+        quote: '林岚把信收进抽屉',
+        status: 'recurring',
+      }],
+      recurringKeys: [],
+    }
+    markRecurringKeys(carryover, [
+      { category: '剧情连贯性', severity: 'error', quote: '林岚把信收进抽屉' },
+      { category: '剧情连贯性', severity: 'error', quote: '林岚把信收进抽屉' },
+    ])
     expect(carryover.recurringKeys).toEqual([evidenceKey('剧情连贯性', '林岚把信收进抽屉')])
   })
 })
