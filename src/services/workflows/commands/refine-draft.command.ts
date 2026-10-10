@@ -15,6 +15,7 @@ import {
 import { promptLanguageText } from '../../prompt-language'
 import { assertMateriallyCompleteRevision } from './refinement-completeness'
 import { assertNoExactDuplicateParagraphs } from '../../../shared/duplicate-spans'
+import { normalizeParagraphSpacing } from '../../../shared/paragraph-spacing'
 import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 
@@ -96,7 +97,7 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
       context,
     )
     this.assertNotCancelled(context)
-    const cleanRefined = this.stripThinkingTags(refined).trim()
+    const cleanRefined = normalizeParagraphSpacing(this.stripThinkingTags(refined).trim())
     assertMateriallyCompleteRevision(
       draft,
       cleanRefined,
