@@ -243,8 +243,13 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
     // 两种模式共用「审稿驱动修稿」模板：模板内的模式切换变量决定输出合同
     // （整章正文 vs 补丁 JSON），两个模板同键，只有一份可编辑、只有一个覆盖点。
     const wholeChapterMode = Boolean(confirmedReview.authorGuidance.trim())
-    const template = await resolvePromptTemplate('refine_from_review', projectSession, writingLanguage)
-    if (!template) throw new Error(text('未找到审稿修复模板', 'The review-based revision template was not found.'))
+    const template = wholeChapterMode
+      ? await resolvePromptTemplate('refine_from_review_whole', projectSession, writingLanguage)
+      : await resolvePromptTemplate('refine_from_review', projectSession, writingLanguage)
+    if (!template) throw new Error(text(
+      wholeChapterMode ? '未找到审稿全篇修稿模板' : '未找到审稿修复模板',
+      wholeChapterMode ? 'The whole-chapter review revision template was not found.' : 'The review-based revision template was not found.',
+    ))
 
     const confirmedReviewBrief = renderHumanConfirmedReviewBrief(confirmedReview, writingLanguage)
 

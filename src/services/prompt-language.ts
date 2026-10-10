@@ -44,6 +44,7 @@ export const CORE_LOCALIZED_BUILTIN_PROMPT_KEYS = Object.freeze([
   'consistency_check_logic',
   'consistency_check_narration',
   'refine_from_review',
+  'refine_from_review_whole',
   'split_key_events',
   'generate_chapter_notes',
   'update_character_cards',
@@ -622,6 +623,37 @@ Output exactly one JSON object in this shape:
 {"items":[{"category":"person consistency","severity":"error","quote":"exact source sentence","description":"first-person sentence inside third-person narration"}]}
 
 severity must be error, warning, or pass. The root object allows only items; never output summary, goalReviews, or any other field. Return 1–10 items total; do not add pass items merely to cover categories, and never repeat the same issue. Keep each quote within 160 characters and each description within 200 characters. quote may be omitted only for pass items. Do not output Markdown, explanation, or reasoning.`,
+  },
+  refine_from_review_whole: {
+    systemRole: 'You are a rigorous fiction editor. Make only the changes required by the human-confirmed review items and the author\'s whole-chapter guidance, preserving authorial facts, character voice, and every valid passage neither of them flags.',
+    content: `Revise the chapter as a whole per the [Review report] and the [whole-chapter guidance], and output the complete revised chapter.
+
+[Review report]
+{{review_report}}
+
+[Manuscript to revise]
+{{draft_content}}
+
+[Finalized prior-chapter facts (the revision must not contradict these)]
+{{global_summary}}
+
+[Character states (the revision must not contradict these)]
+{{character_states}}
+
+[Project-wide writing guidance]
+{{global_guidance}}
+
+[Revision principles]
+1. Fix only the problems explicitly named in the review report and the content the whole-chapter guidance calls for, resolved item by item.
+2. Do not polish or rewrite material that neither the report nor the guidance mentions.
+3. Preserve the manuscript\'s voice, pacing, and approximate length.
+4. Minimal change per edit: the smaller the better, fix only the problem itself.
+5. The revision must not contradict [Finalized prior-chapter facts] or [Character states]; when re-anchoring the timeline, the values given in the [whole-chapter guidance] are the single source of truth.`,
+    systemSuffix: `*[Whole-chapter revision guidance — highest priority, drives the whole-chapter revision]*
+{{user_refine_prompt}}
+
+Output the complete revised chapter as plain prose only. No screenplay formatting, no preface, no explanation, and never output JSON or patch formats.
+**[Hard formatting requirement]: separate every paragraph with one blank line; never emit consecutive paragraphs without a blank line.**`,
   },
   split_key_events: {
     systemRole: 'You are a rigorous fiction-structure analyst. Your only job is to reorganize the format of the existing event description; never add, remove, or rewrite events.',
