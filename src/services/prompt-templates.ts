@@ -66,6 +66,7 @@ export const EDITABLE_PROMPT_KEYS: string[] = [
   'consistency_check_narration',
   'analyze_writing_style',
   'refine_from_review',
+  'refine_from_review_whole',
   'split_key_events',
   'generate_chapter_notes',
   'update_character_cards',
@@ -1301,9 +1302,51 @@ severity 取值：error=严重违规强烈建议修复, warning=轻微不一致�
   },
 
   {
+    key: 'refine_from_review_whole',
+    name: '审稿全篇修稿',
+    description: '总体修稿指导驱动的整章修订：以当前正文为底稿输出修订后的全文章节',
+    systemRole: '你是一位严谨的小说编辑。只依据人工确认的审稿意见与作者全篇修稿指导进行必要修改，保留作者事实、角色声音和未被指出的有效内容。',
+    variables: {
+      review_report: '审稿报告内容',
+      draft_content: '待修稿内容',
+      global_guidance: '全局写作要求',
+      global_summary: '已定稿前文事实',
+      character_states: '角色状态',
+      user_refine_prompt: '总体修稿指导（最高优先级，驱动整章修订）',
+    },
+    content: `请根据【审稿报告】中列出的问题与【全篇修稿指导】，对草稿进行整章修订，直接输出修订后的完整章节。
+
+【审稿报告】
+{{review_report}}
+
+【待修稿内容】
+{{draft_content}}
+
+【已定稿前文事实（修订不得与之矛盾）】
+{{global_summary}}
+
+【角色状态（修订不得与之矛盾）】
+{{character_states}}
+
+【全局写作要求】
+{{global_guidance}}
+
+【修复原则】
+1. 只修复审稿报告中明确指出的问题与全篇修稿指导要求的内容，一条一条逐项解决
+2. 不要进行审稿报告与修稿指导均未提及的润色或改写
+3. 保持原文的风格、节奏和字数体量
+4. 对每处修改保持最小变化原则——改得越少越好，只解决问题本身
+5. 修订不得与【已定稿前文事实】和【角色状态】矛盾；需要重锚时间线时，以【全篇修稿指导】给出的数值为唯一事实`,
+    systemSuffix: `★【全篇修稿指导（最高优先级，驱动整章修订）】★：
+{{user_refine_prompt}}
+
+请直接输出修复后的全文章节内容。强制要求纯文本，严禁剧本式格式，【严禁】任何开场白、解释文字，【严禁】输出 JSON 或补丁格式。
+**【强制排版要求】：段落与段落之间必须保留一个空行作为分隔，绝对不允许连续文本不留空行。**`,
+  },
+
+  {
     key: 'refine_from_review',
-    name: '审稿驱动修稿',
-    description: '根据审稿报告中的问题以定点补丁精准修复草稿',
+    name: '审稿驱动修稿',    description: '根据审稿报告中的问题以定点补丁精准修复草稿',
     systemRole: '你是一位严谨的小说编辑。只依据人工确认的审稿意见产出定点补丁，保留作者事实、角色声音和未被指出的有效内容。',
     variables: {
       review_report: '审稿报告内容',

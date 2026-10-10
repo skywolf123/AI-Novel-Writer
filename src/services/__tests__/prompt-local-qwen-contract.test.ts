@@ -118,6 +118,7 @@ const expectedPromptVariables: Record<string, string[]> = {
   consistency_check_narration: ['chapter_content'],
   analyze_writing_style: ['sample_text'],
   split_key_events: ['chapter_number', 'key_events'],
+  refine_from_review_whole: ['review_report', 'draft_content', 'global_guidance', 'global_summary', 'character_states', 'user_refine_prompt'],
   refine_from_review: [
     'review_report',
     'draft_content',
