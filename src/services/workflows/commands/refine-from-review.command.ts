@@ -24,6 +24,7 @@ import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 import { readCharacterStates, readFinalizedHistory } from '../continuity-context'
 import { applySpotPatches, parseSpotPatches } from '../../../shared/spot-patches'
+import { normalizeParagraphSpacing } from '../../../shared/paragraph-spacing'
 import {
   hasIncludedReviewItems,
   parseHumanConfirmedReviewSnapshot,
@@ -427,7 +428,8 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
       context,
     )
     this.assertNotCancelled(context)
-    return this.stripThinkingTags(refined).trim()
+    // 删除段落会让两侧空行残留为连续空行，按合同折叠为单个空行分隔。
+    return normalizeParagraphSpacing(this.stripThinkingTags(refined).trim())
   }
 
   /**
@@ -497,6 +499,7 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
         'No patch matched the draft text, so no revision was created. Run AI review again and retry.',
       ))
     }
-    return applied.text
+    // 删除类补丁同样会留下连续空行，统一规整。
+    return normalizeParagraphSpacing(applied.text)
   }
 }
